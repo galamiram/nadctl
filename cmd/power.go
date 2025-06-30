@@ -22,18 +22,46 @@ THE SOFTWARE.
 package cmd
 
 import (
-	"github.com/galamiram/nadctl/internal/nadapi"
+	"fmt"
+
+	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
-	"github.com/spf13/viper"
 )
 
 // powerCmd represents the power command
 var powerCmd = &cobra.Command{
 	Use:   "power",
 	Short: "Toggle power on and off",
+	Long: `Toggle the power state of the NAD device.
+
+This command will automatically detect the current power state
+and switch it to the opposite state (on->off or off->on).
+
+Examples:
+  nadctl power              # Toggle power state`,
 	Run: func(cmd *cobra.Command, args []string) {
-		client, _ := nadapi.New(viper.GetString("ip"), "")
-		client.PowerToggle()
+		client, err := connectToDevice()
+		if err != nil {
+			log.WithError(err).Fatal("could not connect to device")
+		}
+		defer client.Disconnect()
+
+		// Get current state to show what we're doing
+		currentState, err := client.GetPowerState()
+		if err != nil {
+			log.WithError(err).Fatal("failed to get current power state")
+		}
+
+		err = client.PowerToggle()
+		if err != nil {
+			log.WithError(err).Fatal("failed to toggle power")
+		}
+
+		newState := "On"
+		if currentState == "On" {
+			newState = "Off"
+		}
+		fmt.Printf("Power toggled: %s -> %s\n", currentState, newState)
 	},
 }
 

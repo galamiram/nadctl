@@ -24,40 +24,35 @@ package cmd
 import (
 	"fmt"
 	"os"
+	"time"
 
-	"github.com/galamiram/nadctl/internal/gui"
-	"github.com/galamiram/nadctl/internal/nadapi"
+	"github.com/mitchellh/go-homedir"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
-
-	homedir "github.com/mitchellh/go-homedir"
 	"github.com/spf13/viper"
+
+	"github.com/galamiram/nadctl/internal/nadapi"
 )
 
 var cfgFile string
 var debug bool
+var noCache bool
+var clearCache bool
 
 // rootCmd represents the base command when called without any subcommands
 var rootCmd = &cobra.Command{
 	Use:   "nadctl",
-	Short: "CLI for controling NAD receivers",
+	Short: "CLI for controlling NAD receivers",
 	Run: func(cmd *cobra.Command, args []string) {
 		if debug {
 			log.SetLevel(log.DebugLevel)
 		}
-		ip := viper.GetString("ip")
-		nadClient, err := nadapi.New(ip, "")
+
+		device, err := connectToDevice()
 		if err != nil {
-			log.WithField("ip", ip).
-				WithError(err).
-				Fatal("could not connect to device")
+			log.WithError(err).Fatal("Failed to connect to device")
 		}
-		nadGui, err := gui.New(nadClient)
-		if err != nil {
-			log.WithError(err).
-				Fatal("failed to create gui")
-		}
-		nadGui.Start()
+		log.WithField("ip", device.IP).Info("Successfully connected to NAD device")
 	},
 }
 
@@ -74,6 +69,20 @@ func init() {
 	cobra.OnInitialize(initConfig)
 	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default is $HOME/.nadctl.yaml)")
 	rootCmd.PersistentFlags().BoolVar(&debug, "debug", false, "enable debug")
+	rootCmd.PersistentFlags().BoolVar(&noCache, "no-cache", false, "disable device discovery cache")
+	rootCmd.PersistentFlags().BoolVar(&clearCache, "clear-cache", false, "clear device discovery cache and exit")
+
+	// Handle clear cache flag
+	cobra.OnInitialize(func() {
+		if clearCache {
+			if err := nadapi.ClearCache(); err != nil {
+				fmt.Printf("Error clearing cache: %v\n", err)
+				os.Exit(1)
+			}
+			fmt.Println("Cache cleared successfully")
+			os.Exit(0)
+		}
+	})
 }
 
 // initConfig reads in config file and ENV variables if set.
@@ -94,5 +103,59 @@ func initConfig() {
 		viper.SetConfigName(".nadctl")
 	}
 
+	// Bind environment variables
+	viper.SetEnvPrefix("NAD")
+	viper.AutomaticEnv()
+
+	// Read config file (ignore if it doesn't exist)
 	viper.ReadInConfig()
+}
+
+// connectToDevice establishes a connection to a NAD device, with automatic discovery if no IP is configured
+func connectToDevice() (*nadapi.Device, error) {
+	ip := viper.GetString("ip")
+	if ip == "" {
+		useCache := !noCache
+		cacheTTL := nadapi.DefaultCacheTTL
+
+		if debug {
+			if useCache {
+				log.Info("No IP address configured, checking cache and discovering NAD devices...")
+			} else {
+				log.Info("No IP address configured, discovering NAD devices (cache disabled)...")
+			}
+		}
+
+		devices, fromCache, err := nadapi.DiscoverDevicesWithCache(30*time.Second, useCache, cacheTTL)
+		if err != nil {
+			return nil, fmt.Errorf("failed to discover devices: %v", err)
+		}
+
+		if len(devices) == 0 {
+			return nil, fmt.Errorf("no NAD devices found on the network. Please specify an IP address manually")
+		}
+
+		ip = devices[0].IP
+		if debug {
+			cacheStatus := "from network scan"
+			if fromCache {
+				cacheStatus = "from cache"
+			}
+
+			if len(devices) == 1 {
+				log.WithFields(log.Fields{
+					"ip":     ip,
+					"model":  devices[0].Model,
+					"source": cacheStatus,
+				}).Info("Automatically discovered and using NAD device")
+			} else {
+				log.WithFields(log.Fields{
+					"count":  len(devices),
+					"source": cacheStatus,
+				}).Info("Multiple NAD devices found, using first one")
+			}
+		}
+	}
+
+	return nadapi.New(ip, "")
 }

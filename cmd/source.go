@@ -22,19 +22,127 @@ THE SOFTWARE.
 package cmd
 
 import (
+	"fmt"
+	"strings"
+
 	"github.com/galamiram/nadctl/internal/nadapi"
+	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
-	"github.com/spf13/viper"
 )
 
 // sourceCmd represents the source command
 var sourceCmd = &cobra.Command{
-	Use:   "source",
-	Short: "Set input source",
+	Use:   "source [SOURCE_NAME|next|prev|list]",
+	Short: "Set or get input source",
+	Long: `Set the input source to a specific source or cycle through sources.
+
+Available sources: Stream, Wireless, TV, Phono, Coax1, Coax2, Opt1, Opt2
+
+Examples:
+  nadctl source              # Show current source
+  nadctl source Stream       # Set source to Stream
+  nadctl source tv           # Set source to TV (case-insensitive)  
+  nadctl source next         # Switch to next source
+  nadctl source prev         # Switch to previous source
+  nadctl source list         # List all available sources`,
+	Args: cobra.MaximumNArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
-		client, _ := nadapi.New(viper.GetString("ip"), "")
-		client.ToggleSource(nadapi.DirectionUp)
+		client, err := connectToDevice()
+		if err != nil {
+			log.WithError(err).Fatal("could not connect to device")
+		}
+		defer client.Disconnect()
+
+		// No arguments - show current source
+		if len(args) == 0 {
+			currentSource, err := client.GetSource()
+			if err != nil {
+				log.WithError(err).Fatal("failed to get current source")
+			}
+			fmt.Printf("Current source: %s\n", currentSource)
+			return
+		}
+
+		arg := args[0]
+
+		// Handle special commands
+		switch strings.ToLower(arg) {
+		case "list":
+			sources := nadapi.GetAvailableSources()
+			fmt.Println("Available sources:")
+			for i, source := range sources {
+				fmt.Printf("  %d. %s\n", i+1, source)
+			}
+			return
+
+		case "next":
+			newSource, err := client.ToggleSource(nadapi.DirectionUp)
+			if err != nil {
+				log.WithError(err).Fatal("failed to change source")
+			}
+			// Extract the source name from response
+			if val, extractErr := extractValue(newSource); extractErr == nil {
+				fmt.Printf("Source changed to: %s\n", val)
+			} else {
+				fmt.Println("Source changed to next")
+			}
+			return
+
+		case "prev", "previous":
+			newSource, err := client.ToggleSource(nadapi.DirectionDown)
+			if err != nil {
+				log.WithError(err).Fatal("failed to change source")
+			}
+			// Extract the source name from response
+			if val, extractErr := extractValue(newSource); extractErr == nil {
+				fmt.Printf("Source changed to: %s\n", val)
+			} else {
+				fmt.Println("Source changed to previous")
+			}
+			return
+
+		default:
+			// Try to set to specific source
+			if !nadapi.IsValidSource(arg) {
+				fmt.Printf("Error: '%s' is not a valid source name.\n\n", arg)
+				fmt.Println("Available sources:")
+				sources := nadapi.GetAvailableSources()
+				for i, source := range sources {
+					fmt.Printf("  %d. %s\n", i+1, source)
+				}
+				fmt.Println("\nYou can also use: next, prev, list")
+				return
+			}
+
+			err = client.SetSource(arg)
+			if err != nil {
+				log.WithError(err).Fatal("failed to set source")
+			}
+
+			// Find the proper case for the source name
+			sources := nadapi.GetAvailableSources()
+			var properName string
+			for _, s := range sources {
+				if strings.EqualFold(s, arg) {
+					properName = s
+					break
+				}
+			}
+
+			fmt.Printf("Source set to: %s\n", properName)
+		}
 	},
+}
+
+// Helper function to extract value from response (copied from nadapi package)
+func extractValue(raw string) (string, error) {
+	s := strings.Split(raw, "=")
+	if len(s) > 1 {
+		// Simple trim of newline and carriage return
+		result := strings.TrimRight(s[1], "\r\n")
+		return result, nil
+	}
+	return "", fmt.Errorf("failed to extract value")
 }
 
 func init() {

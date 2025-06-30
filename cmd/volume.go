@@ -22,28 +22,158 @@ THE SOFTWARE.
 package cmd
 
 import (
+	"fmt"
+	"strconv"
+	"strings"
+
 	"github.com/galamiram/nadctl/internal/nadapi"
+	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
-	"github.com/spf13/viper"
 )
 
 // volumeCmd represents the volume command
 var volumeCmd = &cobra.Command{
-	Use:       "volume",
-	Short:     "Set the volume",
-	ValidArgs: []string{"up", "down"},
-	Args:      cobra.ExactValidArgs(1),
+	Use:   "volume [LEVEL|up|down]",
+	Short: "Set or get volume level",
+	Long: `Set the volume to a specific level or adjust it relatively.
+
+Volume levels are typically in the range of -80 to +10 dB.
+
+Examples:
+  nadctl volume              # Show current volume
+  nadctl volume set -20      # Set volume to -20 dB (recommended for negative)
+  nadctl volume -- -20       # Alternative syntax for negative volumes
+  nadctl volume 0            # Set volume to 0 dB (reference level)
+  nadctl volume up           # Increase volume by 1 dB
+  nadctl volume down         # Decrease volume by 1 dB
+
+Note: For negative volume levels, you can use:
+  nadctl volume set -10      # Easiest way (recommended)
+  nadctl volume -- -10       # Alternative using -- separator`,
+	Args: cobra.MaximumNArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
-		client, _ := nadapi.New(viper.GetString("ip"), "")
-		if args[1] == "up" {
-			client.TuneVolume(nadapi.DirectionUp)
+		client, err := connectToDevice()
+		if err != nil {
+			log.WithError(err).Fatal("could not connect to device")
 		}
-		if args[1] == "down" {
-			client.TuneVolume(nadapi.DirectionDown)
+		defer client.Disconnect()
+
+		// No arguments - show current volume
+		if len(args) == 0 {
+			currentVolume, err := client.GetVolumeFloat()
+			if err != nil {
+				log.WithError(err).Fatal("failed to get current volume")
+			}
+			fmt.Printf("Current volume: %.1f dB\n", currentVolume)
+			return
+		}
+
+		arg := strings.ToLower(args[0])
+
+		// Handle relative adjustments
+		switch arg {
+		case "up":
+			err = client.TuneVolume(nadapi.DirectionUp)
+			if err != nil {
+				log.WithError(err).Fatal("failed to increase volume")
+			}
+			newVolume, err := client.GetVolumeFloat()
+			if err == nil {
+				fmt.Printf("Volume increased to: %.1f dB\n", newVolume)
+			} else {
+				fmt.Println("Volume increased")
+			}
+			return
+
+		case "down":
+			err = client.TuneVolume(nadapi.DirectionDown)
+			if err != nil {
+				log.WithError(err).Fatal("failed to decrease volume")
+			}
+			newVolume, err := client.GetVolumeFloat()
+			if err == nil {
+				fmt.Printf("Volume decreased to: %.1f dB\n", newVolume)
+			} else {
+				fmt.Println("Volume decreased")
+			}
+			return
+
+		default:
+			// Try to parse as a volume level
+			volume, err := strconv.ParseFloat(args[0], 64)
+			if err != nil {
+				fmt.Printf("Error: '%s' is not a valid volume level.\n\n", args[0])
+				fmt.Println("Usage:")
+				fmt.Println("  nadctl volume              # Show current volume")
+				fmt.Println("  nadctl volume set -20      # Set volume to -20 dB (recommended for negative)")
+				fmt.Println("  nadctl volume -- -20       # Alternative syntax for negative volumes")
+				fmt.Println("  nadctl volume 0            # Set volume to 0 dB")
+				fmt.Println("  nadctl volume up           # Increase volume")
+				fmt.Println("  nadctl volume down         # Decrease volume")
+				fmt.Println("\nVolume range is typically -80 to +10 dB")
+				fmt.Println("Note: Use -- before negative numbers to prevent flag parsing")
+				return
+			}
+
+			// Warn about potentially dangerous volume levels
+			if volume > 5 {
+				fmt.Printf("Warning: Volume level %.1f dB is quite high. Continue? (y/N): ", volume)
+				var response string
+				fmt.Scanln(&response)
+				if strings.ToLower(response) != "y" && strings.ToLower(response) != "yes" {
+					fmt.Println("Volume change cancelled")
+					return
+				}
+			}
+
+			err = client.SetVolume(volume)
+			if err != nil {
+				log.WithError(err).Fatal("failed to set volume")
+			}
+
+			fmt.Printf("Volume set to: %.1f dB\n", volume)
 		}
 	},
 }
 
 func init() {
 	rootCmd.AddCommand(volumeCmd)
+
+	// Add convenient aliases for common volume levels
+	volumeCmd.AddCommand(&cobra.Command{
+		Use:   "set LEVEL",
+		Short: "Set volume to a specific level",
+		Args:  cobra.ExactArgs(1),
+		Run: func(cmd *cobra.Command, args []string) {
+			volume, err := strconv.ParseFloat(args[0], 64)
+			if err != nil {
+				fmt.Printf("Error: '%s' is not a valid volume level.\n", args[0])
+				return
+			}
+
+			client, err := connectToDevice()
+			if err != nil {
+				log.WithError(err).Fatal("could not connect to device")
+			}
+			defer client.Disconnect()
+
+			// Warn about potentially dangerous volume levels
+			if volume > 5 {
+				fmt.Printf("Warning: Volume level %.1f dB is quite high. Continue? (y/N): ", volume)
+				var response string
+				fmt.Scanln(&response)
+				if strings.ToLower(response) != "y" && strings.ToLower(response) != "yes" {
+					fmt.Println("Volume change cancelled")
+					return
+				}
+			}
+
+			err = client.SetVolume(volume)
+			if err != nil {
+				log.WithError(err).Fatal("failed to set volume")
+			}
+
+			fmt.Printf("Volume set to: %.1f dB\n", volume)
+		},
+	})
 }
