@@ -57,27 +57,6 @@ Examples:
   nadctl tui               # Launch the TUI interface
   nadctl tui --demo        # Launch TUI in demo mode (no NAD device required)`,
 	Run: func(cmd *cobra.Command, args []string) {
-		// Set up file logging first if requested
-		logToFile, _ := cmd.Root().PersistentFlags().GetBool("log-to-file")
-		if logToFile {
-			// For TUI, log only to file to avoid interfering with the display
-			if err := setupFileLoggingOnlyToFile(); err != nil {
-				log.WithError(err).Warn("Failed to set up file logging, continuing with console only")
-			}
-		}
-
-		// Then set debug level if debug flag is set (this will override file logging level if needed)
-		if debug {
-			log.SetLevel(log.DebugLevel)
-			// Also enable file logging if not already enabled
-			if !logToFile {
-				// For TUI in debug mode, also log only to file to avoid interfering with display
-				if err := setupFileLoggingOnlyToFile(); err != nil {
-					log.WithError(err).Warn("Failed to set up file logging in debug mode, continuing with console only")
-				}
-			}
-		}
-
 		log.Debug("Launching TUI interface")
 
 		// Check if demo mode is enabled
@@ -92,6 +71,28 @@ Examples:
 		// Set demo mode in the app if flag is set
 		if demoMode {
 			app.SetDemoMode(true)
+		}
+
+		// Set up TUI logging based on configuration
+		logToFile, _ := cmd.Root().PersistentFlags().GetBool("log-to-file")
+		if debug {
+			log.SetLevel(log.DebugLevel)
+		}
+
+		if logToFile || debug {
+			// Set up file logging and TUI logging
+			if err := setupFileLoggingOnlyToFile(); err != nil {
+				log.WithError(err).Warn("Failed to set up file logging, logs will only appear in TUI")
+				// Still set up TUI logging without file
+				tui.SetupTUILogging(app)
+			} else {
+				// We need to get the file handle to pass to TUI logging
+				// For now, use the simpler approach and let file logging be separate
+				tui.SetupTUILogging(app)
+			}
+		} else {
+			// No file logging requested, just TUI logging (no console output)
+			tui.SetupTUILogging(app)
 		}
 
 		// Set up signal handling for graceful cleanup

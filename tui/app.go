@@ -31,7 +31,7 @@ const (
 	TabDevice Tab = iota
 	TabSpotify
 	TabSettings
-	TabHelp
+	TabLogs
 )
 
 // TabInfo holds information about each tab
@@ -88,6 +88,11 @@ type App struct {
 
 	// Demo mode (no NAD device required)
 	demoMode bool // true when running in demo mode
+
+	// Logs panel
+	logEntries    []LogEntry // stored log entries for display
+	logScrollPos  int        // current scroll position in logs
+	maxLogEntries int        // maximum number of log entries to keep
 }
 
 // DeviceStatus holds the current device state
@@ -112,6 +117,14 @@ const (
 	MessageError
 	MessageWarning
 )
+
+// LogEntry represents a single log entry for display in the logs tab
+type LogEntry struct {
+	Timestamp time.Time
+	Level     string
+	Message   string
+	Fields    map[string]interface{}
+}
 
 var spinnerFrames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
 
@@ -257,6 +270,9 @@ type keyMap struct {
 	SpotifyShuffle    key.Binding
 	SpotifyAuth       key.Binding
 	SpotifyDisconnect key.Binding
+	// Log controls
+	LogScrollUp   key.Binding
+	LogScrollDown key.Binding
 }
 
 // ShortHelp returns the key bindings to be shown in the mini help view
@@ -344,6 +360,9 @@ var keys = keyMap{
 	SpotifyShuffle:    key.NewBinding(key.WithKeys("h"), key.WithHelp("h", "shuffle Spotify")),
 	SpotifyAuth:       key.NewBinding(key.WithKeys("a"), key.WithHelp("a", "authenticate Spotify")),
 	SpotifyDisconnect: key.NewBinding(key.WithKeys("x"), key.WithHelp("x", "disconnect Spotify")),
+	// Log controls
+	LogScrollUp:   key.NewBinding(key.WithKeys("up", "k"), key.WithHelp("↑/k", "scroll up")),
+	LogScrollDown: key.NewBinding(key.WithKeys("down", "j"), key.WithHelp("↓/j", "scroll down")),
 }
 
 // NewApp creates a new TUI application
@@ -405,7 +424,7 @@ func NewApp() *App {
 			{ID: TabDevice, Name: "Device", Icon: "🎛️", ShortKey: "1"},
 			{ID: TabSpotify, Name: "Spotify", Icon: "🎵", ShortKey: "2"},
 			{ID: TabSettings, Name: "Settings", Icon: "⚙️", ShortKey: "3"},
-			{ID: TabHelp, Name: "Help", Icon: "❓", ShortKey: "4"},
+			{ID: TabLogs, Name: "Logs", Icon: "��", ShortKey: "4"},
 		},
 		// Spotify
 		spotifyClient:    spotifyClient,
@@ -419,6 +438,10 @@ func NewApp() *App {
 		spotifyAuthURL:   "",
 		// Demo mode (no NAD device required)
 		demoMode: false,
+		// Logs panel
+		logEntries:    make([]LogEntry, 0),
+		logScrollPos:  0,
+		maxLogEntries: 1000, // Keep last 1000 log entries
 	}
 }
 
@@ -604,7 +627,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, nil
 
 		case key.Matches(msg, a.keys.Tab4):
-			a.setTab(TabHelp)
+			a.setTab(TabLogs)
 			return a, nil
 
 		case key.Matches(msg, a.keys.Discover):
@@ -718,9 +741,19 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return a, a.nextSource()
 
 			case key.Matches(msg, a.keys.Up):
+				// Handle differently if we're in the logs tab
+				if a.currentTab == TabLogs {
+					a.scrollLogsUp()
+					return a, nil
+				}
 				return a, a.brightnessUp()
 
 			case key.Matches(msg, a.keys.Down):
+				// Handle differently if we're in the logs tab
+				if a.currentTab == TabLogs {
+					a.scrollLogsDown()
+					return a, nil
+				}
 				return a, a.brightnessDown()
 			}
 		} else {
@@ -732,9 +765,31 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				key.Matches(msg, a.keys.VolumeDown),
 				key.Matches(msg, a.keys.VolumeSet),
 				key.Matches(msg, a.keys.Left),
-				key.Matches(msg, a.keys.Right),
-				key.Matches(msg, a.keys.Up),
-				key.Matches(msg, a.keys.Down):
+				key.Matches(msg, a.keys.Right):
+				if a.demoMode {
+					a.setMessage("Demo mode - NAD device controls disabled (try Spotify controls with 'a')", MessageInfo)
+				} else {
+					a.setMessage("Connect to device first (press 'd' to discover)", MessageWarning)
+				}
+				return a, nil
+			case key.Matches(msg, a.keys.Up):
+				// Handle logs scrolling even when not connected
+				if a.currentTab == TabLogs {
+					a.scrollLogsUp()
+					return a, nil
+				}
+				if a.demoMode {
+					a.setMessage("Demo mode - NAD device controls disabled (try Spotify controls with 'a')", MessageInfo)
+				} else {
+					a.setMessage("Connect to device first (press 'd' to discover)", MessageWarning)
+				}
+				return a, nil
+			case key.Matches(msg, a.keys.Down):
+				// Handle logs scrolling even when not connected
+				if a.currentTab == TabLogs {
+					a.scrollLogsDown()
+					return a, nil
+				}
 				if a.demoMode {
 					a.setMessage("Demo mode - NAD device controls disabled (try Spotify controls with 'a')", MessageInfo)
 				} else {
@@ -860,8 +915,8 @@ func (a *App) View() string {
 		mainContent = a.renderSpotifyTab(availableHeight)
 	case TabSettings:
 		mainContent = a.renderSettingsTab(availableHeight)
-	case TabHelp:
-		mainContent = a.renderHelpTab(availableHeight)
+	case TabLogs:
+		mainContent = a.renderLogsTab(availableHeight)
 	default:
 		mainContent = a.renderDeviceTab(availableHeight)
 	}
@@ -957,9 +1012,7 @@ func (a *App) View() string {
 	}
 
 	// Help - make it span the available width
-	if a.currentTab != TabHelp { // Don't show help twice if we're on help tab
-		sections = append(sections, a.renderHelp())
-	}
+	sections = append(sections, a.renderHelp())
 
 	// Join all sections and ensure it fits in terminal height
 	content := lipgloss.JoinVertical(lipgloss.Left, sections...)
@@ -1670,6 +1723,167 @@ func (a *App) renderSettingsTab(availableHeight int) string {
 	}
 
 	return strings.Join(panels, "\n")
+}
+
+func (a *App) renderLogsTab(availableHeight int) string {
+	// Calculate responsive panel width based on terminal width
+	// Use most of the available width, leaving small margins
+	totalWidth := a.width - 4 // Leave 4 chars total margin (2 on each side)
+	panelWidth := totalWidth
+
+	// Ensure minimum viable width
+	if panelWidth < 40 {
+		panelWidth = 40
+	}
+
+	panelStyle := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(primaryColor).
+		Padding(1, 2).
+		Margin(0, 1, 1, 0).
+		Width(panelWidth)
+
+	// Calculate how many log lines we can show
+	// Reserve space for panel header, borders, and scroll info
+	maxDisplayLines := availableHeight - 6 // 6 lines for header, borders, scroll info
+
+	if maxDisplayLines < 5 {
+		maxDisplayLines = 5
+	}
+
+	var logContent strings.Builder
+
+	if len(a.logEntries) == 0 {
+		logContent.WriteString(mutedTextStyle.Render("No log entries yet.\n\n"))
+		logContent.WriteString(mutedTextStyle.Render("Logs will appear here as the application runs.\n"))
+		logContent.WriteString(mutedTextStyle.Render("Use ↑↓ to scroll when logs are present."))
+	} else {
+		// Calculate display range based on scroll position
+		totalLogs := len(a.logEntries)
+
+		// Ensure scroll position is valid
+		if a.logScrollPos < 0 {
+			a.logScrollPos = 0
+		}
+		if a.logScrollPos >= totalLogs {
+			a.logScrollPos = totalLogs - 1
+		}
+
+		// Calculate start and end indices for display
+		startIdx := a.logScrollPos
+		endIdx := startIdx + maxDisplayLines
+		if endIdx > totalLogs {
+			endIdx = totalLogs
+			startIdx = endIdx - maxDisplayLines
+			if startIdx < 0 {
+				startIdx = 0
+			}
+		}
+
+		// Display the log entries
+		for i := startIdx; i < endIdx; i++ {
+			entry := a.logEntries[i]
+
+			// Format timestamp
+			timeStr := entry.Timestamp.Format("15:04:05")
+
+			// Color code by log level
+			var levelStyle lipgloss.Style
+			switch strings.ToUpper(entry.Level) {
+			case "ERROR":
+				levelStyle = errorTextStyle
+			case "WARN", "WARNING":
+				levelStyle = warningTextStyle
+			case "INFO":
+				levelStyle = primaryTextStyle
+			case "DEBUG":
+				levelStyle = mutedTextStyle
+			default:
+				levelStyle = mutedTextStyle
+			}
+
+			// Format the log line
+			levelStr := fmt.Sprintf("[%s]", strings.ToUpper(entry.Level))
+			logLine := fmt.Sprintf("%s %s %s",
+				mutedTextStyle.Render(timeStr),
+				levelStyle.Render(levelStr),
+				entry.Message)
+
+			// Add fields if any
+			if len(entry.Fields) > 0 {
+				var fields []string
+				for k, v := range entry.Fields {
+					fields = append(fields, fmt.Sprintf("%s=%v", k, v))
+				}
+				logLine += " " + mutedTextStyle.Render(fmt.Sprintf("{%s}", strings.Join(fields, ", ")))
+			}
+
+			logContent.WriteString(logLine + "\n")
+		}
+
+		// Add scroll position info
+		if totalLogs > maxDisplayLines {
+			scrollInfo := fmt.Sprintf("Showing %d-%d of %d (scroll: ↑↓)",
+				startIdx+1, endIdx, totalLogs)
+			logContent.WriteString("\n" + mutedTextStyle.Render(scrollInfo))
+		}
+	}
+
+	return panelStyle.Render(
+		labelStyle.Render("📜 Application Logs") + "\n\n" +
+			logContent.String(),
+	)
+}
+
+// scrollLogsUp scrolls the logs view up (shows older entries)
+func (a *App) scrollLogsUp() {
+	if len(a.logEntries) > 0 {
+		a.logScrollPos--
+		if a.logScrollPos < 0 {
+			a.logScrollPos = 0
+		}
+	}
+}
+
+// scrollLogsDown scrolls the logs view down (shows newer entries)
+func (a *App) scrollLogsDown() {
+	if len(a.logEntries) > 0 {
+		a.logScrollPos++
+		maxScroll := len(a.logEntries) - 1
+		if a.logScrollPos > maxScroll {
+			a.logScrollPos = maxScroll
+		}
+	}
+}
+
+// addLogEntry adds a new log entry to the internal log store
+func (a *App) addLogEntry(level, message string, fields map[string]interface{}) {
+	entry := LogEntry{
+		Timestamp: time.Now(),
+		Level:     level,
+		Message:   message,
+		Fields:    fields,
+	}
+
+	a.logEntries = append(a.logEntries, entry)
+
+	// Limit the number of stored log entries
+	if len(a.logEntries) > a.maxLogEntries {
+		// Remove oldest entries
+		excess := len(a.logEntries) - a.maxLogEntries
+		a.logEntries = a.logEntries[excess:]
+
+		// Adjust scroll position accordingly
+		a.logScrollPos -= excess
+		if a.logScrollPos < 0 {
+			a.logScrollPos = 0
+		}
+	}
+
+	// Auto-scroll to bottom (newest entries) by default
+	if a.logScrollPos == len(a.logEntries)-2 || len(a.logEntries) == 1 {
+		a.logScrollPos = len(a.logEntries) - 1
+	}
 }
 
 func (a *App) renderHelpTab(availableHeight int) string {
