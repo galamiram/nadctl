@@ -25,4 +25,14 @@ demo:
 version: build
 	./nadctl version
 
-.PHONY: build install clean test demo version 
+# Create git tag and push release using VERSION file
+release:
+	@echo "Creating release for version $(VERSION)"
+	@git add .
+	@git commit -m "Release v$(VERSION)" || echo "No changes to commit"
+	@git tag v$(VERSION)
+	@git push origin main
+	@git push origin v$(VERSION)
+	@echo "Successfully released v$(VERSION)"
+
+.PHONY: build install clean test demo version release 
