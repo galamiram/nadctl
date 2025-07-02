@@ -34,6 +34,7 @@ type Device struct {
 	IP   net.IP
 	Port string
 	conn net.Conn
+	mu   sync.Mutex // Protects concurrent access to the connection
 }
 
 // DiscoveredDevice represents a NAD device found on the network
@@ -69,7 +70,7 @@ func New(addr, port string) (*Device, error) {
 		"port": d.Port,
 	}).Debug("Attempting to establish connection to NAD device")
 
-	c, err := d.newConn()
+	conn, err := d.newConn()
 	if err != nil {
 		log.WithError(err).WithFields(log.Fields{
 			"ip":   d.IP.String(),
@@ -77,7 +78,7 @@ func New(addr, port string) (*Device, error) {
 		}).Debug("Failed to establish connection")
 		return nil, err
 	}
-	d.conn = c
+	d.conn = conn
 
 	log.WithFields(log.Fields{
 		"ip":   d.IP.String(),
@@ -561,31 +562,59 @@ func (d *Device) ToggleBrightness(direction Direction) error {
 
 // GetRead return bufio reader for reading device messages
 func (d *Device) GetRead() (*bufio.Reader, error) {
-	c, err := d.newConn()
+	conn, err := d.newConn()
 	if err != nil {
 		return nil, err
 	}
-	r := bufio.NewReader(c)
+	// Note: Caller is responsible for closing the connection
+	r := bufio.NewReader(conn)
 	return r, nil
 }
 
 // Disconnect from device
 func (d *Device) Disconnect() error {
-	return d.conn.Close()
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	if d.conn == nil {
+		log.WithField("device", d.IP.String()).Debug("Connection already nil, nothing to disconnect")
+		return nil
+	}
+
+	log.WithField("device", d.IP.String()).Debug("Disconnecting from device")
+	err := d.conn.Close()
+	d.conn = nil // Always set to nil after close attempt
+
+	if err != nil {
+		log.WithError(err).WithField("device", d.IP.String()).Debug("Error during disconnect")
+	} else {
+		log.WithField("device", d.IP.String()).Debug("Successfully disconnected from device")
+	}
+
+	return err
 }
 
 func (d *Device) reconnect() error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
 	log.WithField("device", d.IP.String()).Debug("Reconnecting to device")
-	if err := d.Disconnect(); err != nil {
-		log.WithError(err).WithField("device", d.IP.String()).Debug("Error during disconnect for reconnect")
-		return err
+
+	// Close existing connection if it exists
+	if d.conn != nil {
+		if err := d.conn.Close(); err != nil {
+			log.WithError(err).WithField("device", d.IP.String()).Debug("Error during disconnect for reconnect")
+			// Continue anyway - the connection might already be closed
+		}
+		d.conn = nil
 	}
-	c, err := d.newConn()
+
+	conn, err := d.newConn()
 	if err != nil {
 		log.WithError(err).WithField("device", d.IP.String()).Debug("Failed to establish new connection during reconnect")
 		return err
 	}
-	d.conn = c
+	d.conn = conn
 	log.WithField("device", d.IP.String()).Debug("Successfully reconnected")
 	return nil
 }
@@ -613,27 +642,80 @@ func (d *Device) newConn() (net.Conn, error) {
 }
 
 func (d *Device) send(cmd string) (string, error) {
+	// Lock to prevent concurrent access to the connection
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
 	log.WithFields(log.Fields{
 		"device":  d.IP.String(),
 		"command": cmd,
 	}).Debug("Sending command to device")
 
+	// Check if connection is valid, create new one if needed
+	if d.conn == nil {
+		log.WithField("device", d.IP.String()).Debug("Connection is nil, creating new connection")
+		conn, err := d.newConn()
+		if err != nil {
+			return "", fmt.Errorf("failed to create connection: %w", err)
+		}
+		d.conn = conn
+	}
+
+	// Set a reasonable timeout for the entire operation
+	deadline := time.Now().Add(5 * time.Second)
+	d.conn.SetDeadline(deadline)
+	defer d.conn.SetDeadline(time.Time{}) // Clear deadline after operation
+
+	// Send command
 	_, err := fmt.Fprintf(d.conn, "%s", cmd)
 	if err != nil {
 		log.WithError(err).WithFields(log.Fields{
 			"device":  d.IP.String(),
 			"command": cmd,
-		}).Debug("Failed to send command")
-		return "", err
+		}).Debug("Failed to send command, attempting reconnection")
+
+		// Close the faulty connection and mark as invalid
+		if closeErr := d.conn.Close(); closeErr != nil {
+			log.WithError(closeErr).WithField("device", d.IP.String()).Debug("Error closing faulty connection")
+		}
+		d.conn = nil
+
+		// Try to reconnect and retry once
+		conn, reconnectErr := d.newConn()
+		if reconnectErr != nil {
+			return "", fmt.Errorf("failed to send command and reconnect failed: %w", err)
+		}
+		d.conn = conn
+
+		// Retry the command once
+		d.conn.SetDeadline(time.Now().Add(5 * time.Second))
+		defer d.conn.SetDeadline(time.Time{})
+
+		_, retryErr := fmt.Fprintf(d.conn, "%s", cmd)
+		if retryErr != nil {
+			return "", fmt.Errorf("failed to send command after reconnect: %w", retryErr)
+		}
 	}
 
+	// Read response
 	status, err := bufio.NewReader(d.conn).ReadString('\n')
 	if err != nil {
 		log.WithError(err).WithFields(log.Fields{
 			"device":  d.IP.String(),
 			"command": cmd,
 		}).Debug("Failed to read response")
-		return "", err
+
+		// Close the faulty connection and mark as invalid
+		if closeErr := d.conn.Close(); closeErr != nil {
+			log.WithError(closeErr).WithField("device", d.IP.String()).Debug("Error closing faulty connection after read error")
+		}
+		d.conn = nil
+
+		// Check if it's a timeout error
+		if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+			return "", fmt.Errorf("command timeout after 5 seconds: %w", err)
+		}
+		return "", fmt.Errorf("failed to read response: %w", err)
 	}
 
 	log.WithFields(log.Fields{
@@ -642,7 +724,7 @@ func (d *Device) send(cmd string) (string, error) {
 		"response": strings.TrimSpace(status),
 	}).Debug("Received response from device")
 
-	return status, err
+	return status, nil
 }
 
 func trimSuffix(s string) string {
@@ -823,7 +905,18 @@ func testNADDevice(ctx context.Context, ip string) *DiscoveredDevice {
 		}).Debug("Failed to connect to IP")
 		return nil
 	}
-	defer conn.Close()
+
+	// Ensure connection is always closed
+	defer func() {
+		if closeErr := conn.Close(); closeErr != nil {
+			log.WithFields(log.Fields{
+				"ip":    ip,
+				"error": closeErr.Error(),
+			}).Debug("Error closing test connection")
+		} else {
+			log.WithField("ip", ip).Debug("Successfully closed test connection")
+		}
+	}()
 
 	log.WithField("ip", ip).Debug("Successfully connected, testing for NAD device")
 
@@ -831,6 +924,9 @@ func testNADDevice(ctx context.Context, ip string) *DiscoveredDevice {
 	deadline, ok := ctx.Deadline()
 	if ok {
 		conn.SetDeadline(deadline)
+	} else {
+		// Set a reasonable timeout if no context deadline
+		conn.SetDeadline(time.Now().Add(5 * time.Second))
 	}
 
 	// Try to get the model to verify it's a NAD device
@@ -905,4 +1001,11 @@ func inc(ip net.IP) {
 			break
 		}
 	}
+}
+
+// IsConnected checks if the device has an active connection
+func (d *Device) IsConnected() bool {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.conn != nil
 }

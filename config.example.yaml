@@ -1,0 +1,18 @@
+# NAD Controller Configuration Example
+# Copy this file to ~/.nadctl.yaml and customize
+
+# NAD Device Configuration
+ip: "192.168.1.100"  # IP address of your NAD device (optional, will auto-discover if not set)
+debug: false         # Enable debug logging
+
+# Spotify Integration (optional)
+# Get your Client ID from https://developer.spotify.com/dashboard
+# Uses PKCE flow - no client secret needed for security
+spotify:
+  client_id: "your_spotify_client_id_here"
+  redirect_url: "http://localhost:8080/callback"  # optional, defaults to this
+
+# MCP (Model Context Protocol) Configuration
+mcp:
+  enabled: true
+  port: 8080 

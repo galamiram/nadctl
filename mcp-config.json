@@ -1,7 +1,7 @@
 {
   "mcpServers": {
     "nad-controller": {
-      "command": "/path/to/your/nadctl",
+      "command": "/opt/homebrew/bin/nadctl",
       "args": ["mcp"],
       "env": {
         "NAD_IP": "192.168.1.100"

@@ -24,6 +24,8 @@ package cmd
 import (
 	"fmt"
 	"os"
+	"os/signal"
+	"syscall"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/galamiram/nadctl/tui"
@@ -52,26 +54,86 @@ Keyboard shortcuts:
   d         - Discover devices
 
 Examples:
-  nadctl tui               # Launch the TUI interface`,
+  nadctl tui               # Launch the TUI interface
+  nadctl tui --demo        # Launch TUI in demo mode (no NAD device required)`,
 	Run: func(cmd *cobra.Command, args []string) {
+		// Set up file logging first if requested
+		logToFile, _ := cmd.Root().PersistentFlags().GetBool("log-to-file")
+		if logToFile {
+			// For TUI, log only to file to avoid interfering with the display
+			if err := setupFileLoggingOnlyToFile(); err != nil {
+				log.WithError(err).Warn("Failed to set up file logging, continuing with console only")
+			}
+		}
+
+		// Then set debug level if debug flag is set (this will override file logging level if needed)
 		if debug {
 			log.SetLevel(log.DebugLevel)
+			// Also enable file logging if not already enabled
+			if !logToFile {
+				// For TUI in debug mode, also log only to file to avoid interfering with display
+				if err := setupFileLoggingOnlyToFile(); err != nil {
+					log.WithError(err).Warn("Failed to set up file logging in debug mode, continuing with console only")
+				}
+			}
 		}
 
 		log.Debug("Launching TUI interface")
 
+		// Check if demo mode is enabled
+		demoMode, _ := cmd.Flags().GetBool("demo")
+		if demoMode {
+			log.Info("Starting TUI in demo mode - NAD device connection not required")
+		}
+
 		// Create and run the TUI application
 		app := tui.NewApp()
-		p := tea.NewProgram(app, tea.WithAltScreen())
+
+		// Set demo mode in the app if flag is set
+		if demoMode {
+			app.SetDemoMode(true)
+		}
+
+		// Set up signal handling for graceful cleanup
+		sigChan := make(chan os.Signal, 1)
+		signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+
+		// Start signal handler in background
+		go func() {
+			sig := <-sigChan
+			log.WithField("signal", sig.String()).Debug("Received signal, initiating cleanup")
+
+			// Perform cleanup
+			if err := app.Cleanup(); err != nil {
+				log.WithError(err).Debug("Errors occurred during signal cleanup")
+			}
+
+			// Exit gracefully
+			fmt.Println("\nGraceful shutdown complete")
+			os.Exit(0)
+		}()
+
+		p := tea.NewProgram(app, tea.WithAltScreen(), tea.WithMouseCellMotion())
 
 		if _, err := p.Run(); err != nil {
 			log.WithError(err).Error("Failed to run TUI")
 			fmt.Printf("Error running TUI: %v\n", err)
+
+			// Still perform cleanup even if TUI failed
+			if cleanupErr := app.Cleanup(); cleanupErr != nil {
+				log.WithError(cleanupErr).Debug("Errors occurred during error cleanup")
+			}
+
 			os.Exit(1)
 		}
+
+		// Normal exit - cleanup is handled by the quit key handler in the TUI
+		log.Debug("TUI exited normally")
 	},
 }
 
 func init() {
 	rootCmd.AddCommand(tuiCmd)
+	// Add demo flag to the TUI command
+	tuiCmd.Flags().BoolP("demo", "d", false, "run in demo mode without NAD device connection")
 }

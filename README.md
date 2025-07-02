@@ -47,7 +47,17 @@ sudo mv nadctl /usr/local/bin/
 # Requires Go 1.21+
 git clone https://github.com/galamiram/nadctl.git
 cd nadctl
-go build -o nadctl
+
+# Build with make (recommended - includes version injection)
+make build
+
+# Or build manually
+go build -o nadctl .
+
+# To inject version from VERSION file
+make build
+# This is equivalent to:
+# go build -ldflags "-X github.com/galamiram/nadctl/internal/version.Version=$(cat VERSION | tr -d '\n')" -o nadctl .
 ```
 
 ## Features
@@ -281,12 +291,20 @@ NAD_IP=127.0.0.1 nadctl tui
 - **?** - Show help
 - **q** - Quit
 
+#### Spotify Controls (when configured):
+- **t** - Toggle Spotify panel visibility
+- **space** - Play/pause current Spotify track
+- **n** - Next Spotify track
+- **b** - Previous Spotify track
+- **s** - Toggle shuffle mode
+
 #### TUI Features:
 - 🔴🟢 Real-time connection status indicators
 - 📊 Visual progress bars for volume and brightness
 - 🎨 Color-coded status messages
 - ⚡ Auto-refresh every 10 seconds
 - 🖥️ Multi-panel layout with device information
+- 🎵 **NEW: Spotify integration** with now playing info and controls
 
 ### Device Simulator
 
@@ -379,6 +397,9 @@ nadctl mcp --device-ip 192.168.1.100  # Start MCP server with specific device
 nadctl simulator                   # Start NAD device simulator
 nadctl simulator --port 8080      # Start simulator on custom port
 
+# Version information
+nadctl version                     # Show version information
+
 # Device discovery
 nadctl discover                    # List all NAD devices on network
 nadctl discover --refresh          # Force network rescan
@@ -438,6 +459,17 @@ export NAD_DEBUG=true
 
 ### Development & Testing
 
+#### Available Make Targets
+
+```bash
+make build         # Build with version injection from VERSION file
+make version       # Build and show version
+make test          # Run all tests
+make demo          # Build and run TUI in demo mode
+make install       # Build and install to /usr/local/bin
+make clean         # Clean build artifacts
+```
+
 #### Using the Simulator
 The built-in simulator is perfect for development and testing:
 
@@ -476,6 +508,67 @@ This will show whether devices were loaded from cache or discovered via network 
 - Network connectivity to NAD devices
 - Terminal with color support (for best TUI experience)
 
+### Spotify Integration Setup
+
+The TUI now includes optional Spotify integration to show currently playing music and control playback alongside your NAD device controls.
+
+#### Prerequisites
+- **Spotify Premium Account**: Required for playback control
+- **Spotify Developer App**: You need API credentials
+
+#### Quick Setup
+
+1. **Create Spotify App**:
+   - Visit [Spotify Developer Dashboard](https://developer.spotify.com/dashboard)
+   - Create a new app (select "Desktop" app type for PKCE support)
+   - Note your **Client ID** (no client secret needed!)
+   - Add `http://localhost:8080/callback` as a redirect URI
+
+2. **Configure NAD Controller**:
+   ```bash
+   # Copy example config
+   cp config.example.yaml ~/.nadctl.yaml
+   
+   # Edit config with your Spotify Client ID
+   nano ~/.nadctl.yaml
+   ```
+
+3. **Add your Client ID to `~/.nadctl.yaml`**:
+   ```yaml
+   spotify:
+     client_id: "your_actual_client_id_here"
+     redirect_url: "http://localhost:8080/callback"  # optional
+   ```
+
+4. **Launch TUI and authenticate**:
+   ```bash
+   ./nadctl tui
+   # Press 'a' to start Spotify authentication
+   # Browser opens automatically - authorize the app
+   # Copy the authorization code from the redirect URL back to the app
+   ```
+
+#### Security Note
+This implementation uses **PKCE (Proof Key for Code Exchange)** flow, which is the recommended OAuth2 flow for native/desktop applications. Unlike server-side apps, **no client secret is needed**, making it more secure for client-side applications.
+
+#### What You Get
+- **Now Playing Info**: Track, artist, album, progress
+- **Playback Controls**: Play/pause, next/previous, shuffle
+- **Visual Progress**: Track progress bar
+- **Dual Control**: Independent NAD device and Spotify control
+- **Auto-refresh**: Real-time updates every 5 seconds
+
+For detailed setup instructions, see [SPOTIFY_SETUP.md](SPOTIFY_SETUP.md).
+
+### Version Information
+
+Check the version of your installation:
+```bash
+nadctl version
+```
+
+For release notes and version history, see [CHANGELOG.md](CHANGELOG.md).
+
 ### Dependencies
 
 - [Bubble Tea](https://github.com/charmbracelet/bubbletea) - TUI framework
@@ -483,6 +576,7 @@ This will show whether devices were loaded from cache or discovered via network 
 - [Bubbles](https://github.com/charmbracelet/bubbles) - TUI components
 - [Logrus](https://github.com/sirupsen/logrus) - Structured logging
 - [MCP Go](https://github.com/mark3labs/mcp-go) - Model Context Protocol
+- [Spotify Web API SDK](https://github.com/zmb3/spotify) - Spotify integration
 
 ## 🤝 Contributing
 

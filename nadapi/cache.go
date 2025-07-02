@@ -18,6 +18,21 @@ type CachedDiscovery struct {
 	TTL       time.Duration      `json:"ttl"`
 }
 
+// SpotifyTokenCache represents cached Spotify token information
+type SpotifyTokenCache struct {
+	AccessToken  string    `json:"access_token"`
+	TokenType    string    `json:"token_type"`
+	RefreshToken string    `json:"refresh_token"`
+	Expiry       time.Time `json:"expiry"`
+	ClientID     string    `json:"client_id"`
+}
+
+// AppCache represents the complete application cache
+type AppCache struct {
+	Discovery *CachedDiscovery   `json:"discovery,omitempty"`
+	Spotify   *SpotifyTokenCache `json:"spotify,omitempty"`
+}
+
 // DefaultCacheTTL is the default time-to-live for cached discovery results
 const DefaultCacheTTL = 5 * time.Minute
 
@@ -52,66 +67,44 @@ func SetCacheFilePathFunc(fn func() (string, error)) {
 func LoadCachedDevices() ([]DiscoveredDevice, error) {
 	log.Debug("Loading cached devices")
 
-	cachePath, err := GetCacheFilePath()
+	cache, err := LoadAppCache()
 	if err != nil {
-		log.WithError(err).Debug("Failed to get cache file path")
+		log.WithError(err).Debug("Failed to load app cache")
 		return nil, err
 	}
 
-	log.WithField("cachePath", cachePath).Debug("Cache file path determined")
-
-	// Check if cache file exists
-	if _, err := os.Stat(cachePath); os.IsNotExist(err) {
-		log.WithField("cachePath", cachePath).Debug("Cache file does not exist")
-		return nil, nil // No cache file, return empty
+	if cache.Discovery == nil {
+		log.Debug("No discovery data in cache")
+		return nil, nil // No discovery cache
 	}
 
-	log.WithField("cachePath", cachePath).Debug("Cache file exists, reading contents")
-
-	// Read cache file
-	data, err := os.ReadFile(cachePath)
-	if err != nil {
-		log.WithError(err).WithField("cachePath", cachePath).Debug("Failed to read cache file")
-		return nil, fmt.Errorf("failed to read cache file: %v", err)
-	}
-
+	discovery := cache.Discovery
 	log.WithFields(log.Fields{
-		"cachePath": cachePath,
-		"dataSize":  len(data),
-	}).Debug("Successfully read cache file")
-
-	var cache CachedDiscovery
-	if err := json.Unmarshal(data, &cache); err != nil {
-		log.WithError(err).WithField("cachePath", cachePath).Debug("Failed to parse cache file JSON")
-		return nil, fmt.Errorf("failed to parse cache file: %v", err)
-	}
-
-	log.WithFields(log.Fields{
-		"deviceCount": len(cache.Devices),
-		"timestamp":   cache.Timestamp,
-		"ttl":         cache.TTL,
-	}).Debug("Successfully parsed cache file")
+		"deviceCount": len(discovery.Devices),
+		"timestamp":   discovery.Timestamp,
+		"ttl":         discovery.TTL,
+	}).Debug("Successfully loaded discovery cache")
 
 	// Check if cache is expired
-	age := time.Since(cache.Timestamp)
-	if age > cache.TTL {
+	age := time.Since(discovery.Timestamp)
+	if age > discovery.TTL {
 		log.WithFields(log.Fields{
 			"age":       age,
-			"ttl":       cache.TTL,
+			"ttl":       discovery.TTL,
 			"expired":   true,
-			"timestamp": cache.Timestamp,
-		}).Debug("Cache is expired")
+			"timestamp": discovery.Timestamp,
+		}).Debug("Discovery cache is expired")
 		return nil, nil // Cache expired
 	}
 
 	log.WithFields(log.Fields{
 		"age":         age,
-		"ttl":         cache.TTL,
+		"ttl":         discovery.TTL,
 		"expired":     false,
-		"deviceCount": len(cache.Devices),
-	}).Debug("Cache is valid, returning cached devices")
+		"deviceCount": len(discovery.Devices),
+	}).Debug("Discovery cache is valid, returning cached devices")
 
-	return cache.Devices, nil
+	return discovery.Devices, nil
 }
 
 // SaveCachedDevices saves device discovery results to cache
@@ -121,43 +114,20 @@ func SaveCachedDevices(devices []DiscoveredDevice, ttl time.Duration) error {
 		"ttl":         ttl,
 	}).Debug("Saving devices to cache")
 
-	cachePath, err := GetCacheFilePath()
+	// Load existing cache to preserve Spotify tokens
+	cache, err := LoadAppCache()
 	if err != nil {
-		log.WithError(err).Debug("Failed to get cache file path")
-		return err
+		cache = &AppCache{} // Start with empty cache if load fails
 	}
 
-	log.WithField("cachePath", cachePath).Debug("Cache file path determined for saving")
-
-	cache := CachedDiscovery{
+	// Update discovery data
+	cache.Discovery = &CachedDiscovery{
 		Devices:   devices,
 		Timestamp: time.Now(),
 		TTL:       ttl,
 	}
 
-	data, err := json.MarshalIndent(cache, "", "  ")
-	if err != nil {
-		log.WithError(err).Debug("Failed to marshal cache data to JSON")
-		return fmt.Errorf("failed to marshal cache data: %v", err)
-	}
-
-	log.WithFields(log.Fields{
-		"cachePath": cachePath,
-		"dataSize":  len(data),
-	}).Debug("Successfully marshaled cache data")
-
-	if err := os.WriteFile(cachePath, data, 0644); err != nil {
-		log.WithError(err).WithField("cachePath", cachePath).Debug("Failed to write cache file")
-		return fmt.Errorf("failed to write cache file: %v", err)
-	}
-
-	log.WithFields(log.Fields{
-		"cachePath":   cachePath,
-		"deviceCount": len(devices),
-		"ttl":         ttl,
-	}).Debug("Successfully saved devices to cache file")
-
-	return nil
+	return SaveAppCache(cache)
 }
 
 // ClearCache removes the cached discovery results
@@ -266,4 +236,116 @@ func DiscoverDevicesWithCache(timeout time.Duration, useCache bool, cacheTTL tim
 	}).Debug("Device discovery with cache completed")
 
 	return devices, fromCache, nil
+}
+
+// LoadAppCache loads the complete application cache
+func LoadAppCache() (*AppCache, error) {
+	log.Debug("Loading application cache")
+
+	cachePath, err := GetCacheFilePath()
+	if err != nil {
+		log.WithError(err).Debug("Failed to get cache file path")
+		return nil, err
+	}
+
+	// Check if cache file exists
+	if _, err := os.Stat(cachePath); os.IsNotExist(err) {
+		log.WithField("cachePath", cachePath).Debug("Cache file does not exist")
+		return &AppCache{}, nil // Return empty cache
+	}
+
+	// Read cache file
+	data, err := os.ReadFile(cachePath)
+	if err != nil {
+		log.WithError(err).WithField("cachePath", cachePath).Debug("Failed to read cache file")
+		return nil, fmt.Errorf("failed to read cache file: %v", err)
+	}
+
+	// Try to parse as new AppCache format first
+	var appCache AppCache
+	if err := json.Unmarshal(data, &appCache); err == nil && (appCache.Discovery != nil || appCache.Spotify != nil) {
+		log.Debug("Successfully loaded new format app cache")
+		return &appCache, nil
+	}
+
+	// Fall back to legacy CachedDiscovery format for backward compatibility
+	var legacyCache CachedDiscovery
+	if err := json.Unmarshal(data, &legacyCache); err != nil {
+		log.WithError(err).WithField("cachePath", cachePath).Debug("Failed to parse cache file")
+		return nil, fmt.Errorf("failed to parse cache file: %v", err)
+	}
+
+	log.Debug("Loaded legacy cache format, converting to new format")
+	return &AppCache{Discovery: &legacyCache}, nil
+}
+
+// SaveAppCache saves the complete application cache
+func SaveAppCache(cache *AppCache) error {
+	log.Debug("Saving application cache")
+
+	cachePath, err := GetCacheFilePath()
+	if err != nil {
+		log.WithError(err).Debug("Failed to get cache file path")
+		return err
+	}
+
+	data, err := json.MarshalIndent(cache, "", "  ")
+	if err != nil {
+		log.WithError(err).Debug("Failed to marshal cache data to JSON")
+		return fmt.Errorf("failed to marshal cache data: %v", err)
+	}
+
+	if err := os.WriteFile(cachePath, data, 0644); err != nil {
+		log.WithError(err).WithField("cachePath", cachePath).Debug("Failed to write cache file")
+		return fmt.Errorf("failed to write cache file: %v", err)
+	}
+
+	log.Debug("Successfully saved application cache")
+	return nil
+}
+
+// LoadSpotifyToken loads cached Spotify token
+func LoadSpotifyToken() (*SpotifyTokenCache, error) {
+	log.Debug("Loading Spotify token from cache")
+
+	cache, err := LoadAppCache()
+	if err != nil {
+		return nil, err
+	}
+
+	if cache.Spotify == nil {
+		log.Debug("No Spotify token in cache")
+		return nil, nil
+	}
+
+	log.Debug("Successfully loaded Spotify token from cache")
+	return cache.Spotify, nil
+}
+
+// SaveSpotifyToken saves Spotify token to cache
+func SaveSpotifyToken(tokenCache *SpotifyTokenCache) error {
+	log.Debug("Saving Spotify token to cache")
+
+	cache, err := LoadAppCache()
+	if err != nil {
+		cache = &AppCache{} // Start with empty cache if load fails
+	}
+
+	cache.Spotify = tokenCache
+
+	return SaveAppCache(cache)
+}
+
+// ClearSpotifyToken removes Spotify token from cache
+func ClearSpotifyToken() error {
+	log.Debug("Clearing Spotify token from cache")
+
+	cache, err := LoadAppCache()
+	if err != nil {
+		return err
+	}
+
+	cache.Spotify = nil
+
+	return SaveAppCache(cache)
 }

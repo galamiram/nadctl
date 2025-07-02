@@ -23,7 +23,9 @@ package cmd
 
 import (
 	"fmt"
+	"io"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/mitchellh/go-homedir"
@@ -38,14 +40,31 @@ var cfgFile string
 var debug bool
 var noCache bool
 var clearCache bool
+var debugMode bool
+var demoMode bool
+var logToFile bool
 
 // rootCmd represents the base command when called without any subcommands
 var rootCmd = &cobra.Command{
 	Use:   "nadctl",
 	Short: "CLI for controlling NAD receivers",
 	Run: func(cmd *cobra.Command, args []string) {
+		// Set up file logging first if requested
+		if logToFile {
+			if err := setupFileLogging(); err != nil {
+				log.WithError(err).Warn("Failed to set up file logging, continuing with console only")
+			}
+		}
+
+		// Then set debug level if debug flag is set (this will override file logging level if needed)
 		if debug {
 			log.SetLevel(log.DebugLevel)
+			// Also enable file logging if not already enabled
+			if !logToFile {
+				if err := setupFileLogging(); err != nil {
+					log.WithError(err).Warn("Failed to set up file logging in debug mode, continuing with console only")
+				}
+			}
 		}
 
 		device, err := connectToDevice()
@@ -71,6 +90,9 @@ func init() {
 	rootCmd.PersistentFlags().BoolVar(&debug, "debug", false, "enable debug")
 	rootCmd.PersistentFlags().BoolVar(&noCache, "no-cache", false, "disable device discovery cache")
 	rootCmd.PersistentFlags().BoolVar(&clearCache, "clear-cache", false, "clear device discovery cache and exit")
+	rootCmd.PersistentFlags().BoolVar(&debugMode, "debug-mode", false, "enable debug mode")
+	rootCmd.PersistentFlags().BoolVar(&demoMode, "demo", false, "enable demo mode (TUI without NAD device)")
+	rootCmd.PersistentFlags().BoolVar(&logToFile, "log-to-file", false, "enable logging to file")
 
 	// Handle clear cache flag
 	cobra.OnInitialize(func() {
@@ -227,3 +249,60 @@ func connectToDevice() (*nadapi.Device, error) {
 	return device, nil
 }
 
+// setupFileLogging configures file logging in addition to console logging
+func setupFileLogging() error {
+	return setupFileLoggingWithConsole(true)
+}
+
+// setupFileLoggingOnlyToFile configures file logging without console output
+func setupFileLoggingOnlyToFile() error {
+	return setupFileLoggingWithConsole(false)
+}
+
+// setupFileLoggingWithConsole configures file logging with optional console output
+func setupFileLoggingWithConsole(includeConsole bool) error {
+	// Get home directory
+	home, err := homedir.Dir()
+	if err != nil {
+		return fmt.Errorf("failed to get home directory: %v", err)
+	}
+
+	// Create logs directory if it doesn't exist
+	logDir := filepath.Join(home, ".nadctl_logs")
+	if err := os.MkdirAll(logDir, 0755); err != nil {
+		return fmt.Errorf("failed to create log directory: %v", err)
+	}
+
+	// Create log file with timestamp
+	logFile := filepath.Join(logDir, "nadctl.log")
+
+	// Open log file
+	file, err := os.OpenFile(logFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	if err != nil {
+		return fmt.Errorf("failed to open log file: %v", err)
+	}
+
+	// Configure logrus to write to file only or file + console
+	if includeConsole {
+		log.SetOutput(io.MultiWriter(os.Stderr, file))
+	} else {
+		log.SetOutput(file)
+	}
+
+	// Set formatting for better file logs
+	log.SetFormatter(&log.TextFormatter{
+		FullTimestamp:   true,
+		TimestampFormat: "2006-01-02 15:04:05.000",
+		ForceColors:     false, // No colors in file logs
+	})
+
+	// Set log level to Debug when file logging is enabled to capture everything
+	log.SetLevel(log.DebugLevel)
+
+	log.WithField("logFile", logFile).Info("File logging enabled")
+	if includeConsole {
+		fmt.Printf("📝 Debug logs will be written to: %s\n", logFile)
+	}
+
+	return nil
+}
