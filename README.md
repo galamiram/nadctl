@@ -4,12 +4,202 @@ A lightweight application for controlling NAD amplifiers. It contains both a **T
 
 ## Features
 - **Terminal User Interface (TUI)**: Interactive real-time control with visual feedback
+- **Model Context Protocol (MCP) Server**: LLM integration for AI-powered audio control
 - **Device Simulator**: Built-in NAD device simulator for testing without hardware
 - **Automatic Device Discovery**: Automatically finds NAD devices on your network
 - **Smart Caching**: Caches discovery results for faster subsequent operations (5-minute TTL)
 - **Command Line Interface**: Control your NAD device via CLI commands
 - **Multiple Device Support**: Handles multiple devices on the network
 - **Configuration Support**: Use config files or environment variables
+
+## Model Context Protocol (MCP) Server
+
+**NEW**: Control your NAD device using AI assistants like Cursor, Claude Desktop, or any MCP-compatible LLM tool!
+
+The MCP server allows LLMs to control your NAD audio device through a standardized protocol. This enables natural language control of your audio system.
+
+### Quick Start with MCP
+
+1. **Start the MCP server:**
+   ```bash
+   # Auto-discover device
+   ./nadctl mcp
+   
+   # Or specify device IP
+   NAD_IP=192.168.1.100 ./nadctl mcp
+   
+   # Or use command flags
+   ./nadctl mcp --device-ip 192.168.1.100
+   ```
+
+2. **Configure your AI tool** (see sections below for specific tools)
+
+3. **Start controlling with natural language:**
+   - "Turn on my NAD device"
+   - "Set volume to -25 dB"
+   - "Switch to TV input"
+   - "What's the current status of my audio system?"
+
+### Available MCP Tools
+
+The MCP server provides these tools for LLM use:
+
+#### Power Control
+- `nad_power_on` - Turn on the device
+- `nad_power_off` - Turn off the device  
+- `nad_power_toggle` - Toggle power state
+- `nad_power_status` - Get current power state
+
+#### Volume Control
+- `nad_volume_set` - Set specific volume level (dB)
+- `nad_volume_up` - Increase volume
+- `nad_volume_down` - Decrease volume
+- `nad_volume_status` - Get current volume
+- `nad_mute_toggle` - Toggle mute state
+- `nad_mute_status` - Get mute status
+
+#### Source Control
+- `nad_source_set` - Set input source (Stream, TV, etc.)
+- `nad_source_next` - Switch to next source
+- `nad_source_previous` - Switch to previous source
+- `nad_source_status` - Get current source
+- `nad_source_list` - List available sources
+
+#### Brightness Control
+- `nad_brightness_set` - Set display brightness (0-3)
+- `nad_brightness_up` - Increase brightness
+- `nad_brightness_down` - Decrease brightness
+- `nad_brightness_status` - Get current brightness
+
+#### Device Information
+- `nad_discover` - Find NAD devices on network
+- `nad_device_info` - Get device information
+- `nad_device_status` - Get comprehensive device status
+
+### MCP Resources
+
+The server also provides these data resources:
+
+- `nad://device/status` - Real-time device status (JSON)
+- `nad://device/sources` - Available input sources (JSON)
+- `nad://device/capabilities` - Device capabilities and specifications (JSON)
+
+### MCP Prompts
+
+Pre-configured conversation starters:
+
+- `nad_audio_setup` - Audio setup assistance
+- `nad_troubleshoot` - Device troubleshooting help
+- `nad_quick_control` - Quick control access
+
+### Setup with Cursor
+
+1. **Build and get the path to your nadctl binary:**
+   ```bash
+   go build -o nadctl
+   pwd  # Note this path
+   ```
+
+2. **Open Cursor Settings:**
+   - Click the settings cog (⚙️) in the top right
+   - Navigate to "MCP" section
+
+3. **Add MCP Server:**
+   - Click "Add MCP Server"
+   - Name: `NAD Audio Controller`
+   - Path: `/full/path/to/your/nadctl` (use the path from step 1)
+   - Args: `["mcp"]`
+   - Environment Variables (optional):
+     - `NAD_IP`: `192.168.1.100` (your device IP)
+
+4. **Save and Test:**
+   - Click "Save"
+   - Click "Refresh"
+   - Look for green dot indicating successful connection
+
+### Setup with Claude Desktop
+
+1. **Find or create Claude Desktop config file:**
+   ```bash
+   # macOS
+   ~/Library/Application Support/Claude/claude_desktop_config.json
+   
+   # Windows
+   %APPDATA%\Claude\claude_desktop_config.json
+   
+   # Linux
+   ~/.config/Claude/claude_desktop_config.json
+   ```
+
+2. **Add this configuration:**
+   ```json
+   {
+     "mcpServers": {
+       "nad-controller": {
+         "command": "/full/path/to/your/nadctl",
+         "args": ["mcp"],
+         "env": {
+           "NAD_IP": "192.168.1.100"
+         }
+       }
+     }
+   }
+   ```
+
+3. **Restart Claude Desktop**
+
+### Setup with Other MCP Tools
+
+For other MCP-compatible tools, use this general configuration:
+
+- **Command:** `/full/path/to/your/nadctl`
+- **Arguments:** `["mcp"]`
+- **Transport:** stdio
+- **Environment Variables:**
+  - `NAD_IP`: Your device IP (optional, will auto-discover if not set)
+  - `NAD_PORT`: Device port (optional, defaults to 30001)
+
+### Example Usage with AI
+
+Once configured, you can control your NAD device naturally:
+
+**User:** "Turn on my audio system and set it to TV input"
+
+**AI:** I'll turn on your NAD device and switch to TV input.
+
+*[Uses nad_power_on and nad_source_set tools]*
+
+Power: On ✓
+Source: TV ✓
+
+**User:** "What's the current volume level?"
+
+**AI:** *[Uses nad_volume_status tool]*
+
+The current volume is -30 dB.
+
+**User:** "That's too quiet, make it a bit louder"
+
+**AI:** *[Uses nad_volume_up tool]*
+
+I've increased the volume to -25 dB. The audio should be louder now.
+
+### Troubleshooting MCP
+
+1. **Server won't start:**
+   - Check that nadctl binary is executable
+   - Verify device IP/connectivity if specified
+   - Check logs in your AI tool
+
+2. **Tools not working:**
+   - Ensure NAD device is on the network
+   - Test regular nadctl commands first
+   - Check device IP and port settings
+
+3. **Connection issues:**
+   - Verify config file syntax (JSON)
+   - Check file paths are absolute
+   - Restart your AI tool after config changes
 
 ## Supported Devices
 - NAD C338
@@ -138,6 +328,10 @@ ip: 192.168.1.100
 ```bash
 # Terminal User Interface
 ./nadctl tui                         # Launch interactive TUI
+
+# Model Context Protocol Server
+./nadctl mcp                         # Start MCP server for LLM integration
+./nadctl mcp --device-ip 192.168.1.100  # Start MCP server with specific device
 
 # Device simulator
 ./nadctl simulator                   # Start NAD device simulator
