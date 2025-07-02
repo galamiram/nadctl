@@ -3,7 +3,7 @@ package cmd
 import (
 	"testing"
 
-	"github.com/galamiram/nadctl/internal/nadapi"
+	"github.com/galamiram/nadctl/nadapi"
 )
 
 func TestVolumeCmdStructure(t *testing.T) {

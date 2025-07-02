@@ -31,7 +31,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 
-	"github.com/galamiram/nadctl/internal/nadapi"
+	"github.com/galamiram/nadctl/nadapi"
 )
 
 var cfgFile string
@@ -87,36 +87,81 @@ func init() {
 
 // initConfig reads in config file and ENV variables if set.
 func initConfig() {
+	log.Debug("Initializing configuration")
+
 	if cfgFile != "" {
 		// Use config file from the flag.
+		log.WithField("configFile", cfgFile).Debug("Using config file from flag")
 		viper.SetConfigFile(cfgFile)
 	} else {
 		// Find home directory.
 		home, err := homedir.Dir()
 		if err != nil {
+			log.WithError(err).Debug("Failed to get home directory")
 			fmt.Println(err)
 			os.Exit(1)
 		}
 
+		log.WithField("homeDir", home).Debug("Found home directory")
+
 		viper.SetConfigType("yaml")
 		viper.AddConfigPath(home)
 		viper.SetConfigName(".nadctl")
+
+		log.WithFields(log.Fields{
+			"configType": "yaml",
+			"configPath": home,
+			"configName": ".nadctl",
+		}).Debug("Set default config file parameters")
 	}
 
 	// Bind environment variables
 	viper.SetEnvPrefix("NAD")
 	viper.AutomaticEnv()
+	log.Debug("Environment variables bound with NAD prefix")
 
 	// Read config file (ignore if it doesn't exist)
-	viper.ReadInConfig()
+	if err := viper.ReadInConfig(); err == nil {
+		log.WithField("configFile", viper.ConfigFileUsed()).Debug("Successfully loaded config file")
+	} else {
+		log.WithError(err).Debug("No config file found or failed to read (using defaults)")
+	}
+
+	// Log some key configuration values in debug mode
+	if debug {
+		ip := viper.GetString("ip")
+		if ip != "" {
+			log.WithField("ip", ip).Debug("IP address configured")
+		} else {
+			log.Debug("No IP address configured")
+		}
+
+		// Check environment variables
+		if nadIP := os.Getenv("NAD_IP"); nadIP != "" {
+			log.WithField("NAD_IP", nadIP).Debug("NAD_IP environment variable set")
+		}
+		if nadDebug := os.Getenv("NAD_DEBUG"); nadDebug != "" {
+			log.WithField("NAD_DEBUG", nadDebug).Debug("NAD_DEBUG environment variable set")
+		}
+	}
+
+	log.Debug("Configuration initialization completed")
 }
 
 // connectToDevice establishes a connection to a NAD device, with automatic discovery if no IP is configured
 func connectToDevice() (*nadapi.Device, error) {
 	ip := viper.GetString("ip")
+	log.WithField("configuredIP", ip).Debug("Checking for configured IP address")
+
 	if ip == "" {
+		log.Debug("No IP address configured, proceeding with device discovery")
 		useCache := !noCache
 		cacheTTL := nadapi.DefaultCacheTTL
+
+		log.WithFields(log.Fields{
+			"useCache": useCache,
+			"cacheTTL": cacheTTL,
+		}).Debug("Device discovery configuration")
 
 		if debug {
 			if useCache {
@@ -126,16 +171,26 @@ func connectToDevice() (*nadapi.Device, error) {
 			}
 		}
 
+		log.Debug("Starting device discovery with cache")
 		devices, fromCache, err := nadapi.DiscoverDevicesWithCache(30*time.Second, useCache, cacheTTL)
 		if err != nil {
+			log.WithError(err).Debug("Device discovery failed")
 			return nil, fmt.Errorf("failed to discover devices: %v", err)
 		}
 
+		log.WithFields(log.Fields{
+			"deviceCount": len(devices),
+			"fromCache":   fromCache,
+		}).Debug("Device discovery completed")
+
 		if len(devices) == 0 {
+			log.Debug("No NAD devices found during discovery")
 			return nil, fmt.Errorf("no NAD devices found on the network. Please specify an IP address manually")
 		}
 
 		ip = devices[0].IP
+		log.WithField("selectedIP", ip).Debug("Selected first discovered device")
+
 		if debug {
 			cacheStatus := "from network scan"
 			if fromCache {
@@ -153,9 +208,22 @@ func connectToDevice() (*nadapi.Device, error) {
 					"count":  len(devices),
 					"source": cacheStatus,
 				}).Info("Multiple NAD devices found, using first one")
+
+				log.WithField("devices", devices).Debug("All discovered devices")
 			}
 		}
+	} else {
+		log.WithField("ip", ip).Debug("Using configured IP address")
 	}
 
-	return nadapi.New(ip, "")
+	log.WithField("ip", ip).Debug("Establishing connection to NAD device")
+	device, err := nadapi.New(ip, "")
+	if err != nil {
+		log.WithError(err).WithField("ip", ip).Debug("Failed to connect to NAD device")
+		return nil, err
+	}
+
+	log.WithField("ip", ip).Debug("Successfully connected to NAD device")
+	return device, nil
 }
+

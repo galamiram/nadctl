@@ -25,7 +25,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/galamiram/nadctl/internal/nadapi"
+	"github.com/galamiram/nadctl/nadapi"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 )
@@ -53,8 +53,11 @@ Examples:
 		}
 		defer client.Disconnect()
 
+		log.WithField("device", client.IP.String()).Debug("Connected to device for source command")
+
 		// No arguments - show current source
 		if len(args) == 0 {
+			log.Debug("No arguments provided, getting current source")
 			currentSource, err := client.GetSource()
 			if err != nil {
 				log.WithError(err).Fatal("failed to get current source")
@@ -63,11 +66,15 @@ Examples:
 			return
 		}
 
-		arg := args[0]
+		arg := strings.ToLower(args[0])
+		log.WithFields(log.Fields{
+			"argument": arg,
+			"original": args[0],
+		}).Debug("Processing source command argument")
 
-		// Handle special commands
-		switch strings.ToLower(arg) {
+		switch arg {
 		case "list":
+			log.Debug("Listing available sources")
 			sources := nadapi.GetAvailableSources()
 			fmt.Println("Available sources:")
 			for i, source := range sources {
@@ -76,34 +83,46 @@ Examples:
 			return
 
 		case "next":
+			log.Debug("Changing to next source")
 			newSource, err := client.ToggleSource(nadapi.DirectionUp)
 			if err != nil {
 				log.WithError(err).Fatal("failed to change source")
 			}
 			// Extract the source name from response
 			if val, extractErr := extractValue(newSource); extractErr == nil {
+				log.WithField("newSource", val).Debug("Successfully changed to next source")
 				fmt.Printf("Source changed to: %s\n", val)
 			} else {
+				log.WithError(extractErr).Debug("Failed to extract source name from response")
 				fmt.Println("Source changed to next")
 			}
 			return
 
 		case "prev", "previous":
+			log.Debug("Changing to previous source")
 			newSource, err := client.ToggleSource(nadapi.DirectionDown)
 			if err != nil {
 				log.WithError(err).Fatal("failed to change source")
 			}
 			// Extract the source name from response
 			if val, extractErr := extractValue(newSource); extractErr == nil {
+				log.WithField("newSource", val).Debug("Successfully changed to previous source")
 				fmt.Printf("Source changed to: %s\n", val)
 			} else {
+				log.WithError(extractErr).Debug("Failed to extract source name from response")
 				fmt.Println("Source changed to previous")
 			}
 			return
 
 		default:
 			// Try to set to specific source
+			log.WithField("sourceName", arg).Debug("Attempting to set specific source")
+
 			if !nadapi.IsValidSource(arg) {
+				log.WithFields(log.Fields{
+					"invalidSource":    arg,
+					"availableSources": nadapi.GetAvailableSources(),
+				}).Debug("Invalid source name provided")
 				fmt.Printf("Error: '%s' is not a valid source name.\n\n", arg)
 				fmt.Println("Available sources:")
 				sources := nadapi.GetAvailableSources()
@@ -114,6 +133,7 @@ Examples:
 				return
 			}
 
+			log.WithField("sourceName", arg).Debug("Source name validated, setting source")
 			err = client.SetSource(arg)
 			if err != nil {
 				log.WithError(err).Fatal("failed to set source")
@@ -129,6 +149,10 @@ Examples:
 				}
 			}
 
+			log.WithFields(log.Fields{
+				"requestedSource": arg,
+				"actualSource":    properName,
+			}).Debug("Successfully set source")
 			fmt.Printf("Source set to: %s\n", properName)
 		}
 	},

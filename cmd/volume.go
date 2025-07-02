@@ -26,7 +26,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/galamiram/nadctl/internal/nadapi"
+	"github.com/galamiram/nadctl/nadapi"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 )
@@ -58,50 +58,66 @@ Note: For negative volume levels, you can use:
 		}
 		defer client.Disconnect()
 
+		log.WithField("device", client.IP.String()).Debug("Connected to device for volume command")
+
 		// No arguments - show current volume
 		if len(args) == 0 {
+			log.Debug("No arguments provided, getting current volume")
 			currentVolume, err := client.GetVolumeFloat()
 			if err != nil {
 				log.WithError(err).Fatal("failed to get current volume")
 			}
+			log.WithField("currentVolume", currentVolume).Debug("Retrieved current volume")
 			fmt.Printf("Current volume: %.1f dB\n", currentVolume)
 			return
 		}
 
 		arg := strings.ToLower(args[0])
+		log.WithFields(log.Fields{
+			"argument": arg,
+			"original": args[0],
+		}).Debug("Processing volume command argument")
 
 		// Handle relative adjustments
 		switch arg {
 		case "up":
+			log.Debug("Increasing volume")
 			err = client.TuneVolume(nadapi.DirectionUp)
 			if err != nil {
 				log.WithError(err).Fatal("failed to increase volume")
 			}
 			newVolume, err := client.GetVolumeFloat()
 			if err == nil {
+				log.WithField("newVolume", newVolume).Debug("Successfully increased volume")
 				fmt.Printf("Volume increased to: %.1f dB\n", newVolume)
 			} else {
+				log.WithError(err).Debug("Failed to get new volume after increase")
 				fmt.Println("Volume increased")
 			}
 			return
 
 		case "down":
+			log.Debug("Decreasing volume")
 			err = client.TuneVolume(nadapi.DirectionDown)
 			if err != nil {
 				log.WithError(err).Fatal("failed to decrease volume")
 			}
 			newVolume, err := client.GetVolumeFloat()
 			if err == nil {
+				log.WithField("newVolume", newVolume).Debug("Successfully decreased volume")
 				fmt.Printf("Volume decreased to: %.1f dB\n", newVolume)
 			} else {
+				log.WithError(err).Debug("Failed to get new volume after decrease")
 				fmt.Println("Volume decreased")
 			}
 			return
 
 		default:
 			// Try to parse as a volume level
+			log.WithField("volumeString", args[0]).Debug("Attempting to parse volume level")
 			volume, err := strconv.ParseFloat(args[0], 64)
 			if err != nil {
+				log.WithError(err).WithField("volumeString", args[0]).Debug("Failed to parse volume level")
 				fmt.Printf("Error: '%s' is not a valid volume level.\n\n", args[0])
 				fmt.Println("Usage:")
 				fmt.Println("  nadctl volume              # Show current volume")
@@ -115,22 +131,30 @@ Note: For negative volume levels, you can use:
 				return
 			}
 
+			log.WithField("parsedVolume", volume).Debug("Successfully parsed volume level")
+
 			// Warn about potentially dangerous volume levels
 			if volume > 5 {
+				log.WithField("volume", volume).Debug("High volume level detected, requesting confirmation")
 				fmt.Printf("Warning: Volume level %.1f dB is quite high. Continue? (y/N): ", volume)
 				var response string
 				fmt.Scanln(&response)
+				log.WithField("userResponse", response).Debug("User response to volume warning")
 				if strings.ToLower(response) != "y" && strings.ToLower(response) != "yes" {
+					log.Debug("User cancelled high volume operation")
 					fmt.Println("Volume change cancelled")
 					return
 				}
+				log.Debug("User confirmed high volume operation")
 			}
 
+			log.WithField("volume", volume).Debug("Setting volume to specific level")
 			err = client.SetVolume(volume)
 			if err != nil {
 				log.WithError(err).Fatal("failed to set volume")
 			}
 
+			log.WithField("volume", volume).Debug("Successfully set volume")
 			fmt.Printf("Volume set to: %.1f dB\n", volume)
 		}
 	},

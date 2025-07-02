@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/galamiram/nadctl/internal/nadapi"
+	"github.com/galamiram/nadctl/nadapi"
 	"github.com/spf13/viper"
 )
 

@@ -26,7 +26,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/galamiram/nadctl/internal/nadapi"
+	"github.com/galamiram/nadctl/nadapi"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 )
