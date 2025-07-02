@@ -55,6 +55,7 @@ brews:
   - repository:
       owner: galamiram
       name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
     homepage: "https://github.com/galamiram/nadctl"
     description: "Control NAD audio receivers with CLI, TUI, and MCP server for LLM integration"
     license: "MIT"
