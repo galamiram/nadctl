@@ -1,6 +1,54 @@
 # nadctl
 
-A lightweight application for controlling NAD amplifiers. It contains both a **Terminal User Interface (TUI)**, **Command Line Interface (CLI)**, and a **device simulator** with automatic device discovery and caching.
+A lightweight application for controlling NAD amplifiers. It contains both a **Terminal User Interface (TUI)**, **Command Line Interface (CLI)**, **Model Context Protocol (MCP) Server**, and a **device simulator** with automatic device discovery and caching.
+
+## 🚀 Installation
+
+### via Homebrew (macOS & Linux)
+
+```bash
+# Add the tap
+brew tap galamiram/tap
+
+# Install nadctl
+brew install nadctl
+
+# Verify installation
+nadctl --help
+```
+
+### via Script (All Platforms)
+
+```bash
+# One-liner install
+curl -sf https://raw.githubusercontent.com/galamiram/nadctl/main/install.sh | sh
+
+# Or download and run manually
+wget https://raw.githubusercontent.com/galamiram/nadctl/main/install.sh
+chmod +x install.sh
+./install.sh
+```
+
+### via GitHub Releases
+
+1. Go to [Releases](https://github.com/galamiram/nadctl/releases)
+2. Download the appropriate binary for your platform
+3. Extract and move to your PATH:
+
+```bash
+# Example for macOS
+tar -xzf nadctl_v1.0.0_darwin_amd64.tar.gz
+sudo mv nadctl /usr/local/bin/
+```
+
+### from Source
+
+```bash
+# Requires Go 1.21+
+git clone https://github.com/galamiram/nadctl.git
+cd nadctl
+go build -o nadctl
+```
 
 ## Features
 - **Terminal User Interface (TUI)**: Interactive real-time control with visual feedback
@@ -23,13 +71,13 @@ The MCP server allows LLMs to control your NAD audio device through a standardiz
 1. **Start the MCP server:**
    ```bash
    # Auto-discover device
-   ./nadctl mcp
+   nadctl mcp
    
    # Or specify device IP
-   NAD_IP=192.168.1.100 ./nadctl mcp
+   NAD_IP=192.168.1.100 nadctl mcp
    
    # Or use command flags
-   ./nadctl mcp --device-ip 192.168.1.100
+   nadctl mcp --device-ip 192.168.1.100
    ```
 
 2. **Configure your AI tool** (see sections below for specific tools)
@@ -94,10 +142,10 @@ Pre-configured conversation starters:
 
 ### Setup with Cursor
 
-1. **Build and get the path to your nadctl binary:**
+1. **Get the path to your nadctl binary:**
    ```bash
-   go build -o nadctl
-   pwd  # Note this path
+   which nadctl  # If installed via Homebrew or script
+   # or if built from source: pwd && ls -la nadctl
    ```
 
 2. **Open Cursor Settings:**
@@ -107,7 +155,7 @@ Pre-configured conversation starters:
 3. **Add MCP Server:**
    - Click "Add MCP Server"
    - Name: `NAD Audio Controller`
-   - Path: `/full/path/to/your/nadctl` (use the path from step 1)
+   - Path: `/opt/homebrew/bin/nadctl` (or your path from step 1)
    - Args: `["mcp"]`
    - Environment Variables (optional):
      - `NAD_IP`: `192.168.1.100` (your device IP)
@@ -136,7 +184,7 @@ Pre-configured conversation starters:
    {
      "mcpServers": {
        "nad-controller": {
-         "command": "/full/path/to/your/nadctl",
+         "command": "/opt/homebrew/bin/nadctl",
          "args": ["mcp"],
          "env": {
            "NAD_IP": "192.168.1.100"
@@ -152,7 +200,7 @@ Pre-configured conversation starters:
 
 For other MCP-compatible tools, use this general configuration:
 
-- **Command:** `/full/path/to/your/nadctl`
+- **Command:** `/opt/homebrew/bin/nadctl` (or your installation path)
 - **Arguments:** `["mcp"]`
 - **Transport:** stdio
 - **Environment Variables:**
@@ -205,12 +253,6 @@ I've increased the volume to -25 dB. The audio should be louder now.
 - NAD C338
 - NAD T 758 V3i (simulated)
 
-## Installation
-
-```bash
-go build -o nadctl
-```
-
 ## Usage
 
 ### Terminal User Interface (TUI)
@@ -219,13 +261,13 @@ Launch the interactive terminal interface:
 
 ```bash
 # Auto-discover and connect to first NAD device
-./nadctl tui
+nadctl tui
 
 # Connect to specific device
-NAD_IP=192.168.1.100 ./nadctl tui
+NAD_IP=192.168.1.100 nadctl tui
 
 # Use with simulator
-NAD_IP=127.0.0.1 ./nadctl tui
+NAD_IP=127.0.0.1 nadctl tui
 ```
 
 #### TUI Controls:
@@ -252,17 +294,17 @@ For testing without real NAD hardware:
 
 ```bash
 # Start simulator on default port (30001)
-./nadctl simulator
+nadctl simulator
 
 # Start on custom port
-./nadctl simulator --port 8080
+nadctl simulator --port 8080
 
 # In another terminal, connect TUI to simulator
-NAD_IP=127.0.0.1 ./nadctl tui
+NAD_IP=127.0.0.1 nadctl tui
 
 # Or test with CLI commands
-NAD_IP=127.0.0.1 ./nadctl power
-NAD_IP=127.0.0.1 ./nadctl volume up
+NAD_IP=127.0.0.1 nadctl power
+NAD_IP=127.0.0.1 nadctl volume up
 ```
 
 #### Simulator Features:
@@ -277,38 +319,38 @@ By default, `nadctl` will automatically scan your network for NAD devices and ca
 
 ```bash
 # First run: scans network and caches results
-./nadctl power
+nadctl power
 
 # Subsequent runs: uses cached results (much faster)
-./nadctl volume up
+nadctl volume up
 
 # Discover all devices on network
-./nadctl discover
+nadctl discover
 
 # Force refresh cache by rescanning network
-./nadctl discover --refresh
+nadctl discover --refresh
 
 # Show cache status
-./nadctl discover --show-cache
+nadctl discover --show-cache
 
 # Clear cache
-./nadctl --clear-cache
+nadctl --clear-cache
 ```
 
 ### Cache Management
 
 ```bash
 # Disable cache for a single command
-./nadctl --no-cache power
+nadctl --no-cache power
 
 # Clear cache and exit
-./nadctl --clear-cache
+nadctl --clear-cache
 
 # Force refresh discovery cache
-./nadctl discover --refresh
+nadctl discover --refresh
 
 # View cache status and information
-./nadctl discover --show-cache
+nadctl discover --show-cache
 ```
 
 ### Manual Configuration
@@ -317,7 +359,7 @@ You can specify a device IP address in several ways:
 ```bash
 # Environment variable
 export NAD_IP=192.168.1.100
-./nadctl power
+nadctl power
 
 # Config file (~/.nadctl.yaml)
 ip: 192.168.1.100
@@ -327,55 +369,55 @@ ip: 192.168.1.100
 
 ```bash
 # Terminal User Interface
-./nadctl tui                         # Launch interactive TUI
+nadctl tui                         # Launch interactive TUI
 
 # Model Context Protocol Server
-./nadctl mcp                         # Start MCP server for LLM integration
-./nadctl mcp --device-ip 192.168.1.100  # Start MCP server with specific device
+nadctl mcp                         # Start MCP server for LLM integration
+nadctl mcp --device-ip 192.168.1.100  # Start MCP server with specific device
 
 # Device simulator
-./nadctl simulator                   # Start NAD device simulator
-./nadctl simulator --port 8080      # Start simulator on custom port
+nadctl simulator                   # Start NAD device simulator
+nadctl simulator --port 8080      # Start simulator on custom port
 
 # Device discovery
-./nadctl discover                    # List all NAD devices on network
-./nadctl discover --refresh          # Force network rescan
-./nadctl discover --show-cache       # Show cached devices
-./nadctl discover --timeout 60s     # Set discovery timeout
+nadctl discover                    # List all NAD devices on network
+nadctl discover --refresh          # Force network rescan
+nadctl discover --show-cache       # Show cached devices
+nadctl discover --timeout 60s     # Set discovery timeout
 
 # Power control
-./nadctl power                       # Toggle power on/off
+nadctl power                       # Toggle power on/off
 
 # Volume control
-./nadctl volume                      # Show current volume
-./nadctl volume set -20              # Set volume to -20 dB (recommended for negative)
-./nadctl volume -- -20               # Alternative syntax for negative volumes
-./nadctl volume 0                    # Set volume to 0 dB (reference level)
-./nadctl volume up                   # Increase volume by 1 dB
-./nadctl volume down                 # Decrease volume by 1 dB
+nadctl volume                      # Show current volume
+nadctl volume set -20              # Set volume to -20 dB (recommended for negative)
+nadctl volume -- -20               # Alternative syntax for negative volumes
+nadctl volume 0                    # Set volume to 0 dB (reference level)
+nadctl volume up                   # Increase volume by 1 dB
+nadctl volume down                 # Decrease volume by 1 dB
 
 # Volume range is typically -80 to +10 dB
 
 # Source control
-./nadctl source                      # Show current source
-./nadctl source list                 # List all available sources
-./nadctl source Stream               # Set source to Stream
-./nadctl source tv                   # Set source to TV (case-insensitive)
-./nadctl source next                 # Switch to next source
-./nadctl source prev                 # Switch to previous source
+nadctl source                      # Show current source
+nadctl source list                 # List all available sources
+nadctl source Stream               # Set source to Stream
+nadctl source tv                   # Set source to TV (case-insensitive)
+nadctl source next                 # Switch to next source
+nadctl source prev                 # Switch to previous source
 
 # Available sources: Stream, Wireless, TV, Phono, Coax1, Coax2, Opt1, Opt2
 
 # Mute control
-./nadctl mute                        # Toggle mute
+nadctl mute                        # Toggle mute
 
 # Display brightness
-./nadctl dim                         # Show current brightness
-./nadctl dim 0                       # Set brightness to 0 (display off)
-./nadctl dim 2                       # Set brightness to 2 (medium)
-./nadctl dim up                      # Increase brightness
-./nadctl dim down                    # Decrease brightness
-./nadctl dim list                    # List all available levels
+nadctl dim                         # Show current brightness
+nadctl dim 0                       # Set brightness to 0 (display off)
+nadctl dim 2                       # Set brightness to 2 (medium)
+nadctl dim up                      # Increase brightness
+nadctl dim down                    # Decrease brightness
+nadctl dim list                    # List all available levels
 
 # Brightness levels: 0 (off), 1 (low), 2 (medium), 3 (high)
 ```
@@ -401,22 +443,22 @@ The built-in simulator is perfect for development and testing:
 
 ```bash
 # Terminal 1: Start simulator
-./nadctl simulator
+nadctl simulator
 
 # Terminal 2: Test TUI
-NAD_IP=127.0.0.1 ./nadctl tui
+NAD_IP=127.0.0.1 nadctl tui
 
 # Terminal 3: Test CLI commands
-NAD_IP=127.0.0.1 ./nadctl power
-NAD_IP=127.0.0.1 ./nadctl volume set -25
-NAD_IP=127.0.0.1 ./nadctl source Stream
+NAD_IP=127.0.0.1 nadctl power
+NAD_IP=127.0.0.1 nadctl volume set -25
+NAD_IP=127.0.0.1 nadctl source Stream
 ```
 
 #### Debug Mode
 Enable debug logging:
 ```bash
-./nadctl --debug power
-LOG_LEVEL=debug ./nadctl simulator
+nadctl --debug power
+LOG_LEVEL=debug nadctl simulator
 ```
 
 This will show whether devices were loaded from cache or discovered via network scan.
@@ -431,7 +473,6 @@ This will show whether devices were loaded from cache or discovered via network 
 
 ### Requirements
 
-- Go 1.19+ (for building from source)
 - Network connectivity to NAD devices
 - Terminal with color support (for best TUI experience)
 
@@ -441,3 +482,23 @@ This will show whether devices were loaded from cache or discovered via network 
 - [Lipgloss](https://github.com/charmbracelet/lipgloss) - Terminal styling
 - [Bubbles](https://github.com/charmbracelet/bubbles) - TUI components
 - [Logrus](https://github.com/sirupsen/logrus) - Structured logging
+- [MCP Go](https://github.com/mark3labs/mcp-go) - Model Context Protocol
+
+## 🤝 Contributing
+
+1. Fork the repository
+2. Create a feature branch (`git checkout -b feature/amazing-feature`)
+3. Commit your changes (`git commit -m 'Add amazing feature'`)
+4. Push to the branch (`git push origin feature/amazing-feature`)
+5. Open a Pull Request
+
+## 📄 License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+## 🙏 Acknowledgements
+
+- NAD Electronics for their excellent audio equipment
+- The Go community for amazing libraries
+- [Charm](https://charm.sh/) for the beautiful TUI framework
+- [Mark3Labs](https://github.com/mark3labs) for the MCP Go implementation

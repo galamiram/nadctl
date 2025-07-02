@@ -618,7 +618,7 @@ func (d *Device) send(cmd string) (string, error) {
 		"command": cmd,
 	}).Debug("Sending command to device")
 
-	_, err := fmt.Fprintf(d.conn, cmd)
+	_, err := fmt.Fprintf(d.conn, "%s", cmd)
 	if err != nil {
 		log.WithError(err).WithFields(log.Fields{
 			"device":  d.IP.String(),

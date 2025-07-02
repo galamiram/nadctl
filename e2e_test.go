@@ -344,7 +344,17 @@ func testBrightnessLimit(t *testing.T, ip string) {
 
 // runNadctlCommand executes a nadctl command against the simulator
 func runNadctlCommand(ip string, args ...string) (string, error) {
-	cmd := exec.Command("./nadctl", args...)
+	// Check if binary exists, if not build it
+	binaryPath := "./nadctl"
+	if _, err := os.Stat(binaryPath); os.IsNotExist(err) {
+		// Binary doesn't exist, build it
+		buildCmd := exec.Command("go", "build", "-o", binaryPath, ".")
+		if buildErr := buildCmd.Run(); buildErr != nil {
+			return "", fmt.Errorf("failed to build nadctl binary: %v", buildErr)
+		}
+	}
+
+	cmd := exec.Command(binaryPath, args...)
 	cmd.Env = append(os.Environ(),
 		fmt.Sprintf("NAD_IP=%s", ip),
 	)
