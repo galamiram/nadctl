@@ -1,6 +1,33 @@
 # Changelog
 
-## [1.1.0] - 2024-12-18
+## [1.2.0] - 2025-07-03
+
+### Added
+- **Logs Panel**: Added dedicated scrollable logs tab in TUI
+  - Real-time log capture and display within TUI interface
+  - Scrollable log view with ↑↓ keys when in Logs tab
+  - Prevents console log interference with TUI display
+  - Stores up to 1000 log entries with automatic cleanup
+  - Color-coded log levels (Error, Warning, Info, Debug)
+- **Make Release Target**: Added `make release` command for automated releases
+  - Automatically reads version from VERSION file
+  - Creates git tag and pushes to origin
+  - Force flag support for re-releasing same version
+
+### Removed
+- **Help Tab**: Removed redundant Help tab (help still shown at bottom of all tabs)
+
+### Changed
+- **TUI Layout**: Reorganized tabs from 5 to 4 (Device, Spotify, Settings, Logs)
+- **Log Management**: Logs now go to file and TUI panel only (no console output in TUI mode)
+
+### Technical Details
+- Added `TUILogHook` for capturing logrus entries in real-time
+- Implemented log scrolling and display management
+- Updated tab navigation and key bindings
+- Enhanced Makefile with automated release workflow
+
+## [1.1.0] - 2025-07-03
 
 ### Added
 - **Version Command**: Added `nadctl version` command to display version information
