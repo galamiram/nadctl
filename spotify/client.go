@@ -19,6 +19,7 @@ import (
 	"github.com/galamiram/nadctl/nadapi"
 	log "github.com/sirupsen/logrus"
 	"github.com/zmb3/spotify/v2"
+	spotifyapi "github.com/zmb3/spotify/v2"
 	spotifyauth "github.com/zmb3/spotify/v2/auth"
 	"golang.org/x/oauth2"
 )
@@ -56,18 +57,28 @@ type Track struct {
 	ImageURL  string
 }
 
+// Device represents a Spotify Connect device
+type Device struct {
+	ID            string `json:"id"`
+	Name          string `json:"name"`
+	Type          string `json:"type"` // Computer, Smartphone, Speaker, etc.
+	IsActive      bool   `json:"is_active"`
+	IsRestricted  bool   `json:"is_restricted"`
+	VolumePercent int    `json:"volume_percent"`
+}
+
 // PlaybackState represents the current playback state
 type PlaybackState struct {
-	Track     Track
-	Device    string
-	Volume    int
-	IsPlaying bool
-	Shuffle   bool
-	Repeat    string // "off", "track", "context"
-	CanPlay   bool
-	CanPause  bool
-	CanNext   bool
-	CanPrev   bool
+	Track            Track
+	Device           string
+	DeviceID         string   // Current device ID
+	AvailableDevices []Device // List of available devices
+	Volume           int
+	IsPlaying        bool
+	Shuffle          bool
+	Repeat           string // off, track, context
+	Progress         int    // Current position in ms
+	Duration         int    // Duration in ms
 }
 
 // NewClient creates a new Spotify client using PKCE flow (no client secret needed)
@@ -347,46 +358,97 @@ func (c *Client) GetCurrentTrack() (*Track, error) {
 	return track, nil
 }
 
-// GetPlaybackState gets the current playback state
-func (c *Client) GetPlaybackState() (*PlaybackState, error) {
+// GetAvailableDevices retrieves all available Spotify Connect devices
+func (c *Client) GetAvailableDevices() ([]Device, error) {
 	if !c.IsConnected() {
 		return nil, fmt.Errorf("not connected to Spotify")
 	}
 
+	devices, err := c.client.PlayerDevices(context.Background())
+	if err != nil {
+		return nil, fmt.Errorf("failed to get available devices: %v", err)
+	}
+
+	var result []Device
+	for _, device := range devices {
+		result = append(result, Device{
+			ID:            device.ID.String(),
+			Name:          device.Name,
+			Type:          device.Type,
+			IsActive:      device.Active,
+			IsRestricted:  device.Restricted,
+			VolumePercent: int(device.Volume), // Volume is of type Numeric, convert to int
+		})
+	}
+
+	return result, nil
+}
+
+// TransferPlaybackToDevice transfers Spotify playback to a specific device
+func (c *Client) TransferPlaybackToDevice(deviceID string, play bool) error {
+	if !c.IsConnected() {
+		return fmt.Errorf("not connected to Spotify")
+	}
+
+	spotifyDeviceID := spotifyapi.ID(deviceID)
+	err := c.client.TransferPlayback(context.Background(), spotifyDeviceID, play)
+	if err != nil {
+		return fmt.Errorf("failed to transfer playback to device %s: %v", deviceID, err)
+	}
+
+	log.WithFields(log.Fields{
+		"device_id": deviceID,
+		"play":      play,
+	}).Info("Successfully transferred playback to device")
+
+	return nil
+}
+
+// GetPlaybackState returns current playback state including device information
+func (c *Client) GetPlaybackState() (PlaybackState, error) {
+	if !c.IsConnected() {
+		log.Debug("Not connected to Spotify")
+		return PlaybackState{}, fmt.Errorf("not connected to Spotify")
+	}
+
+	log.Debug("Getting current playback state from Spotify")
+
 	state, err := c.client.PlayerState(context.Background())
 	if err != nil {
-		return nil, fmt.Errorf("failed to get playback state: %w", err)
+		log.WithError(err).Debug("Failed to get player state")
+		return PlaybackState{}, fmt.Errorf("failed to get player state: %v", err)
 	}
 
 	if state == nil {
-		return nil, fmt.Errorf("no active device")
+		log.Debug("No active playback session")
+		return PlaybackState{}, fmt.Errorf("no active playback")
 	}
 
-	track, err := c.GetCurrentTrack()
-	if err != nil {
-		// Create empty track if we can't get current track
-		track = &Track{}
-	}
+	log.WithFields(log.Fields{
+		"track":     state.Item.Name,
+		"artist":    state.Item.Artists[0].Name,
+		"isPlaying": state.Playing,
+		"device":    state.Device.Name,
+	}).Debug("Retrieved playback state")
 
-	playbackState := &PlaybackState{
-		Track:     *track,
+	// Get volume if available
+	volume := int(state.Device.Volume) // Volume is of type Numeric, Device is not a pointer
+
+	return PlaybackState{
+		Track: Track{
+			Name:   state.Item.Name,
+			Artist: state.Item.Artists[0].Name,
+			Album:  state.Item.Album.Name,
+		},
+		Device:    state.Device.Name,
+		DeviceID:  string(state.Device.ID),
+		Volume:    volume,
 		IsPlaying: state.Playing,
-		Volume:    int(state.Device.Volume),
 		Shuffle:   state.ShuffleState,
 		Repeat:    string(state.RepeatState),
-		// For now, assume basic controls are always available
-		// TODO: Check actual player capabilities when available in API
-		CanPlay:  true,
-		CanPause: true,
-		CanNext:  true,
-		CanPrev:  true,
-	}
-
-	if state.Device.Name != "" {
-		playbackState.Device = state.Device.Name
-	}
-
-	return playbackState, nil
+		Progress:  int(state.Progress),
+		Duration:  int(state.Item.Duration),
+	}, nil
 }
 
 // Play starts or resumes playback

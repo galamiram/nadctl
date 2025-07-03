@@ -1,6 +1,6 @@
 # nadctl
 
-A lightweight application for controlling NAD amplifiers. It contains both a **Terminal User Interface (TUI)**, **Command Line Interface (CLI)**, **Model Context Protocol (MCP) Server**, and a **device simulator** with automatic device discovery and caching.
+A lightweight application for controlling NAD amplifiers with **Spotify device selection and casting** capabilities. It contains both a **Terminal User Interface (TUI)**, **Command Line Interface (CLI)**, **Model Context Protocol (MCP) Server**, and a **device simulator** with automatic device discovery and caching.
 
 ## 🚀 Installation
 
@@ -62,6 +62,7 @@ make build
 
 ## Features
 - **Terminal User Interface (TUI)**: Interactive real-time control with visual feedback
+- **🎵 Spotify Device Casting**: Discover and cast to Chromecast, computers, speakers and other Spotify Connect devices
 - **Model Context Protocol (MCP) Server**: LLM integration for AI-powered audio control
 - **Device Simulator**: Built-in NAD device simulator for testing without hardware
 - **Automatic Device Discovery**: Automatically finds NAD devices on your network
@@ -297,6 +298,9 @@ NAD_IP=127.0.0.1 nadctl tui
 - **n** - Next Spotify track
 - **b** - Previous Spotify track
 - **s** - Toggle shuffle mode
+- **y** - List Spotify devices and select device to cast to
+- **↑/↓** - Navigate device selection (when in device mode)
+- **Enter** - Cast to selected device
 
 #### TUI Features:
 - 🔴🟢 Real-time connection status indicators
@@ -304,7 +308,8 @@ NAD_IP=127.0.0.1 nadctl tui
 - 🎨 Color-coded status messages
 - ⚡ Auto-refresh every 10 seconds
 - 🖥️ Multi-panel layout with device information
-- 🎵 **NEW: Spotify integration** with now playing info and controls
+- 🎵 **Spotify integration** with now playing info, playback controls, and **device casting**
+- 📱 **Spotify Connect Device Management**: Visual device selection with type icons (💻 🔊 📺 📱 🎵 🎧)
 
 ### Device Simulator
 
@@ -429,6 +434,12 @@ nadctl source prev                 # Switch to previous source
 
 # Available sources: Stream, Wireless, TV, Phono, Coax1, Coax2, Opt1, Opt2
 
+# Spotify device casting (when configured)
+nadctl spotify devices             # List available Spotify Connect devices
+nadctl spotify transfer "Chromecast"  # Cast to device by name
+nadctl spotify transfer 1          # Cast to device by index number
+nadctl spotify transfer --play 1   # Cast to device and start playing
+
 # Mute control
 nadctl mute                        # Toggle mute
 
@@ -510,11 +521,29 @@ This will show whether devices were loaded from cache or discovered via network 
 
 ### Spotify Integration Setup
 
-The TUI now includes optional Spotify integration to show currently playing music and control playback alongside your NAD device controls.
+The TUI now includes optional Spotify integration with **device selection and casting** to show currently playing music, control playback, and **cast to any Spotify Connect device** alongside your NAD device controls.
 
 #### Prerequisites
-- **Spotify Premium Account**: Required for playback control
+- **Spotify Premium Account**: Required for playback control and device casting
 - **Spotify Developer App**: You need API credentials
+
+#### What You Get
+- **Now Playing Info**: Track, artist, album, progress
+- **Playback Controls**: Play/pause, next/previous, shuffle
+- **🎯 Device Casting**: Discover and cast to Chromecast, computers, speakers, phones, and other Spotify Connect devices
+- **📱 Visual Device Selection**: Interactive device picker with type icons and status
+- **🎵 Multi-Device Support**: Control playback across your entire Spotify ecosystem
+- **Visual Progress**: Track progress bar
+- **Dual Control**: Independent NAD device and Spotify control
+- **Auto-refresh**: Real-time updates every 5 seconds
+
+#### Device Selection Features
+- **Device Discovery**: Automatically finds all your Spotify Connect devices
+- **Device Types**: Supports computers (💻), speakers (🔊), TVs/Chromecast (📺), phones (📱), and more
+- **Visual Selection**: Navigate with ↑↓ keys and Enter to cast
+- **Active Status**: Shows which device is currently playing
+- **Volume Display**: Shows current volume level for each device
+- **Type Icons**: Visual indicators for different device types
 
 #### Quick Setup
 
@@ -548,15 +577,18 @@ The TUI now includes optional Spotify integration to show currently playing musi
    # Copy the authorization code from the redirect URL back to the app
    ```
 
+5. **Start casting to devices**:
+   ```bash
+   # In the TUI: Press 'y' to show Spotify devices
+   # Use ↑↓ to select a device, Enter to cast
+   
+   # Or use CLI:
+   ./nadctl spotify devices
+   ./nadctl spotify transfer "Living Room Chromecast"
+   ```
+
 #### Security Note
 This implementation uses **PKCE (Proof Key for Code Exchange)** flow, which is the recommended OAuth2 flow for native/desktop applications. Unlike server-side apps, **no client secret is needed**, making it more secure for client-side applications.
-
-#### What You Get
-- **Now Playing Info**: Track, artist, album, progress
-- **Playback Controls**: Play/pause, next/previous, shuffle
-- **Visual Progress**: Track progress bar
-- **Dual Control**: Independent NAD device and Spotify control
-- **Auto-refresh**: Real-time updates every 5 seconds
 
 For detailed setup instructions, see [SPOTIFY_SETUP.md](SPOTIFY_SETUP.md).
 

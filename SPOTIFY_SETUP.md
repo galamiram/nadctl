@@ -1,10 +1,10 @@
 # Spotify Integration Setup Guide
 
-This guide will help you set up Spotify integration with your NAD Audio Controller TUI using the secure PKCE (Proof Key for Code Exchange) flow.
+This guide will help you set up Spotify integration with your NAD Audio Controller TUI, including **device selection and casting** to Chromecast, computers, speakers, and other Spotify Connect devices using the secure PKCE (Proof Key for Code Exchange) flow.
 
 ## Prerequisites
 
-1. **Spotify Premium Account** - Required for controlling playback
+1. **Spotify Premium Account** - Required for controlling playback and casting to devices
 2. **Spotify Application** - You need to create a Spotify app to get a Client ID
 
 ## Why PKCE Flow?
@@ -86,6 +86,10 @@ Copy: AQC8X7Zv9...  (only the code part)
 | `b` | Previous track |
 | `s` | Toggle shuffle mode |
 | `t` | Toggle Spotify panel visibility |
+| **`y`** | **List Spotify devices and enter selection mode** |
+| **`↑/↓`** | **Navigate device selection (when in device mode)** |
+| **`Enter`** | **Cast to selected device** |
+| **`Esc`** | **Cancel device selection mode** |
 
 ### Spotify Panel Features
 
@@ -98,24 +102,121 @@ When visible (press `t` to toggle), the Spotify panel shows:
 - **Volume**: Spotify app volume level
 - **Modes**: Shuffle and repeat status with visual indicators
 
+### NEW: Device Selection Panel
+
+When you press `y`, the interface shows:
+- **Available Devices**: All your Spotify Connect devices
+- **Device Types**: Visual icons for each device type:
+  - 💻 Computer/Desktop
+  - 🔊 Speaker/Sound System
+  - 📺 TV/Chromecast/Smart TV
+  - 📱 Phone/Mobile Device
+  - 🎵 Spotify Connect Device
+  - 🎧 Headphones/Audio Device
+- **Active Status**: Highlighted active device with ▶️ indicator
+- **Volume Levels**: Current volume for each device
+- **Restricted Status**: Shows if device doesn't allow remote control
+
+## Device Selection and Casting
+
+### TUI Device Selection
+
+1. **Enter Device Mode**: Press `y` to show available Spotify devices
+2. **Navigate**: Use `↑` and `↓` arrow keys to select a device
+3. **Cast**: Press `Enter` to transfer playback to the selected device
+4. **Cancel**: Press `Esc` to exit device selection without casting
+
+### CLI Device Commands
+
+```bash
+# List all available Spotify Connect devices
+nadctl spotify devices
+
+# Cast to device by name (supports partial matching)
+nadctl spotify transfer "Living Room"
+nadctl spotify transfer "Chromecast"
+nadctl spotify transfer "Kitchen Speaker"
+
+# Cast to device by index number (from device list)
+nadctl spotify transfer 1
+nadctl spotify transfer 2
+
+# Cast to device and automatically start playing
+nadctl spotify transfer --play "Bedroom Speaker"
+nadctl spotify transfer --play 1
+```
+
+### Device Types Supported
+
+The integration works with any Spotify Connect device:
+- **Chromecast**: Google Cast devices and smart TVs
+- **Smart Speakers**: Sonos, Amazon Echo, Google Home
+- **Computers**: Desktop and laptop Spotify applications
+- **Mobile Devices**: Phones and tablets with Spotify
+- **Audio Systems**: Spotify Connect-enabled receivers and speakers
+- **Gaming Consoles**: PlayStation, Xbox with Spotify app
+
+### Device Selection Examples
+
+**Visual Device List in TUI:**
+```
+Spotify Devices:
+▶️ 💻 MacBook Pro (Active) - Volume: 75%
+   📺 Living Room Chromecast - Volume: 80%
+   🔊 Kitchen Sonos - Volume: 60%
+   📱 iPhone - Volume: 50% (Restricted)
+   🎵 Spotify Connect Speaker - Volume: 90%
+```
+
+**CLI Device List:**
+```
+$ nadctl spotify devices
+Available Spotify Devices:
+1. 💻 MacBook Pro (Active) - Volume: 75%
+2. 📺 Living Room Chromecast - Volume: 80%
+3. 🔊 Kitchen Sonos - Volume: 60%
+4. 📱 iPhone - Volume: 50% (Restricted)
+5. 🎵 Spotify Connect Speaker - Volume: 90%
+```
+
 ## Integration with NAD Controls
 
 The Spotify integration works alongside your NAD device controls:
 - **NAD Controls**: Volume, power, source, brightness affect your physical NAD device
 - **Spotify Controls**: Playback, track navigation, Spotify volume affect the Spotify app
-- **Independent Operation**: Both systems work independently and simultaneously
-- **Visual Feedback**: Both panels update in real-time
+- **Device Casting**: Transfer Spotify playback between any Spotify Connect devices
+- **Independent Operation**: NAD device, Spotify playback, and device casting work independently
+- **Visual Feedback**: All panels update in real-time
 
-## Example Workflow
+## Example Workflows
 
-1. **Start your day**: Power on NAD device with `p`
-2. **Select source**: Choose Spotify input on NAD with `→`/`←`
-3. **Authenticate**: Follow Spotify authentication prompts
-4. **Control playback**: Use `space`, `n`, `b` for music control
-5. **Adjust audio**: Use NAD volume (`+`/`-`) for speakers
-6. **Toggle view**: Press `t` to show/hide Spotify information
+### Home Theater Setup
+1. **Power on NAD**: Press `p` to turn on your NAD amplifier
+2. **Select Spotify source**: Use `→`/`←` to choose Stream or Wireless input
+3. **Authenticate Spotify**: Follow authentication prompts if needed
+4. **Cast to Chromecast**: Press `y`, select TV/Chromecast, press Enter
+5. **Control playback**: Use `space`, `n`, `b` for music control
+6. **Adjust NAD volume**: Use `+`/`-` for speaker volume
+
+### Multi-Room Audio
+1. **List devices**: Use `nadctl spotify devices` to see all rooms
+2. **Cast to kitchen**: `nadctl spotify transfer "Kitchen Speaker"`
+3. **Move to living room**: `nadctl spotify transfer "Living Room Sonos"`
+4. **Continue on phone**: `nadctl spotify transfer "iPhone" --play`
+
+### Quick Device Switching
+1. **TUI mode**: Press `y` to show devices
+2. **Quick select**: Use ↑↓ to highlight, Enter to cast
+3. **Seamless handoff**: Music continues on new device
+4. **Visual confirmation**: Active device indicator updates
 
 ## Troubleshooting
+
+### Device Selection Issues
+- **No devices shown**: Ensure you have active Spotify sessions on other devices
+- **Can't cast to device**: Some devices (like phones) may restrict remote control
+- **Device not appearing**: Make sure the device has Spotify open and is connected to the same network
+- **Casting fails**: Check that the target device supports Spotify Connect
 
 ### Authentication Issues
 - Ensure your redirect URI in Spotify app settings exactly matches `http://localhost:8080/callback`
@@ -127,22 +228,26 @@ The Spotify integration works alongside your NAD device controls:
 - Verify you have an active Spotify session (playing music in any Spotify app)
 - The Spotify Web API requires an active device to control
 - Try refreshing by restarting the TUI and re-authenticating
+- For device casting, ensure target devices are on the same network
 
 ### Panel Not Showing
 - Press `t` to toggle Spotify panel visibility
+- Press `y` to show device selection panel
 - Ensure you're authenticated (look for connection status)
 - Check that Spotify is configured in your config file
 
-### PKCE Flow Issues
-- Make sure your Spotify app is configured as "Desktop App" type
-- Verify the redirect URI matches exactly (including http:// and port)
-- Check that you're copying the full authorization code from the redirect URL
+### Device Casting Errors
+- **"Device is restricted"**: Some devices don't allow remote control
+- **"Transfer failed"**: Target device may be offline or busy
+- **"No active session"**: Start playing music on any device first
+- **"Device not found"**: Device name may have changed or device is offline
 
 ## Security & Privacy
 
 - Your Spotify Client ID is stored locally in the config file
 - Authentication tokens are managed securely using PKCE flow
 - No client secret means no shared secrets that could be compromised
+- Device information is retrieved directly from Spotify's official API
 - No data is transmitted to external services except Spotify's official API
 - Keep your config file permissions secure: `chmod 600 ~/.nadctl.yaml`
 
@@ -150,7 +255,8 @@ The Spotify integration works alongside your NAD device controls:
 
 The integration automatically manages API rate limits by:
 - Queuing commands to prevent overwhelming the API
-- Refreshing state periodically (every 5 seconds) rather than constantly
-- Using efficient batch operations where possible
+- Refreshing device state periodically rather than constantly
+- Using efficient batch operations for device discovery
+- Caching device information to reduce API calls
 
-Enjoy your enhanced audio control experience with secure Spotify integration! 🎵
+Enjoy your enhanced audio control experience with secure Spotify integration and seamless device casting! 🎵📱

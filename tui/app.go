@@ -85,6 +85,11 @@ type App struct {
 	spotifyAuthMode  bool // true when waiting for auth code input
 	spotifyAuthInput textinput.Model
 	spotifyAuthURL   string // URL to show user for authentication
+	// Spotify device management
+	spotifyDevices         []spotify.Device // available Spotify devices
+	spotifyDeviceSelection int              // currently selected device index
+	spotifyDeviceMode      bool             // true when in device selection mode
+	spotifyDevicesLoaded   bool             // true when device list has been loaded
 
 	// Demo mode (no NAD device required)
 	demoMode bool // true when running in demo mode
@@ -154,6 +159,9 @@ const (
 	CmdSpotifyRefresh
 	CmdSpotifyAuth
 	CmdSpotifyDisconnect
+	// New Spotify device commands
+	CmdSpotifyListDevices
+	CmdSpotifyTransferDevice
 )
 
 // QueuedCommand represents a command in the queue
@@ -273,6 +281,12 @@ type keyMap struct {
 	// Log controls
 	LogScrollUp   key.Binding
 	LogScrollDown key.Binding
+	// New Spotify device controls
+	SpotifyDevices      key.Binding
+	SpotifyTransfer     key.Binding
+	SpotifyDeviceUp     key.Binding
+	SpotifyDeviceDown   key.Binding
+	SpotifyDeviceSelect key.Binding
 }
 
 // ShortHelp returns the key bindings to be shown in the mini help view
@@ -363,6 +377,12 @@ var keys = keyMap{
 	// Log controls
 	LogScrollUp:   key.NewBinding(key.WithKeys("up", "k"), key.WithHelp("↑/k", "scroll up")),
 	LogScrollDown: key.NewBinding(key.WithKeys("down", "j"), key.WithHelp("↓/j", "scroll down")),
+	// New Spotify device controls
+	SpotifyDevices:      key.NewBinding(key.WithKeys("u"), key.WithHelp("u", "list Spotify devices")),
+	SpotifyTransfer:     key.NewBinding(key.WithKeys("y"), key.WithHelp("y", "transfer Spotify device")),
+	SpotifyDeviceUp:     key.NewBinding(key.WithKeys("+"), key.WithHelp("+", "increase Spotify device volume")),
+	SpotifyDeviceDown:   key.NewBinding(key.WithKeys("-"), key.WithHelp("-", "decrease Spotify device volume")),
+	SpotifyDeviceSelect: key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "select Spotify device")),
 }
 
 // NewApp creates a new TUI application
@@ -436,6 +456,11 @@ func NewApp() *App {
 		spotifyAuthMode:  false,
 		spotifyAuthInput: spotifyAuthInput,
 		spotifyAuthURL:   "",
+		// Spotify device management
+		spotifyDevices:         make([]spotify.Device, 0),
+		spotifyDeviceSelection: 0,
+		spotifyDeviceMode:      false,
+		spotifyDevicesLoaded:   false,
 		// Demo mode (no NAD device required)
 		demoMode: false,
 		// Logs panel
@@ -586,6 +611,39 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				a.adjustPendingVolume(-1.0)
 				return a, a.resetAdjustTimer()
 
+			// Allow Spotify controls to work even in volume adjustment mode
+			case key.Matches(msg, a.keys.SpotifyPlayPause):
+				if a.spotifyClient != nil {
+					return a, a.spotifyPlayPause()
+				} else {
+					a.setMessage("Spotify not configured", MessageWarning)
+					return a, nil
+				}
+
+			case key.Matches(msg, a.keys.SpotifyNext):
+				if a.spotifyClient != nil {
+					return a, a.spotifyNext()
+				} else {
+					a.setMessage("Spotify not configured", MessageWarning)
+					return a, nil
+				}
+
+			case key.Matches(msg, a.keys.SpotifyPrev):
+				if a.spotifyClient != nil {
+					return a, a.spotifyPrev()
+				} else {
+					a.setMessage("Spotify not configured", MessageWarning)
+					return a, nil
+				}
+
+			case key.Matches(msg, a.keys.SpotifyShuffle):
+				if a.spotifyClient != nil {
+					return a, a.spotifyToggleShuffle()
+				} else {
+					a.setMessage("Spotify not configured", MessageWarning)
+					return a, nil
+				}
+
 			default:
 				// Any other key cancels adjustment mode
 				return a, a.cancelVolumeAdjustment()
@@ -704,6 +762,37 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				a.setMessage("Spotify not connected", MessageWarning)
 				return a, nil
 			}
+
+		// New Spotify device management controls
+		case key.Matches(msg, a.keys.SpotifyDevices):
+			if a.spotifyClient != nil && a.spotifyClient.IsConnected() {
+				return a, a.spotifyListDevices()
+			} else {
+				a.setMessage("Spotify not connected", MessageWarning)
+				return a, nil
+			}
+
+		case key.Matches(msg, a.keys.SpotifyTransfer):
+			if a.spotifyClient != nil && a.spotifyClient.IsConnected() {
+				if !a.spotifyDeviceMode {
+					// Enter device selection mode - always refresh devices first
+					a.spotifyDeviceMode = true
+					a.setMessage("Loading Spotify devices...", MessageInfo)
+					return a, a.spotifyListDevices()
+				} else {
+					// Already in device mode, transfer to selected device
+					return a, a.spotifyTransferToSelected()
+				}
+			} else {
+				a.setMessage("Spotify not connected", MessageWarning)
+				return a, nil
+			}
+
+		case key.Matches(msg, a.keys.SpotifyDeviceSelect):
+			if a.spotifyDeviceMode && len(a.spotifyDevices) > 0 {
+				return a, a.spotifyTransferToSelected()
+			}
+			return a, nil
 		}
 
 		// Handle device control keys (only when connected)
@@ -746,6 +835,11 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					a.scrollLogsUp()
 					return a, nil
 				}
+				// Handle device selection navigation
+				if a.spotifyDeviceMode && a.currentTab == TabSpotify {
+					a.spotifyDeviceSelectionUp()
+					return a, nil
+				}
 				return a, a.brightnessUp()
 
 			case key.Matches(msg, a.keys.Down):
@@ -754,7 +848,25 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					a.scrollLogsDown()
 					return a, nil
 				}
+				// Handle device selection navigation
+				if a.spotifyDeviceMode && a.currentTab == TabSpotify {
+					a.spotifyDeviceSelectionDown()
+					return a, nil
+				}
 				return a, a.brightnessDown()
+
+			// Add Esc key handling for device selection mode
+			case key.Matches(msg, key.NewBinding(key.WithKeys("esc"))):
+				if a.spotifyDeviceMode {
+					a.spotifyDeviceMode = false
+					a.setMessage("Device selection cancelled", MessageInfo)
+					return a, nil
+				}
+				// Perform comprehensive cleanup
+				if err := a.Cleanup(); err != nil {
+					log.WithError(err).Debug("Errors occurred during cleanup")
+				}
+				return a, tea.Quit
 			}
 		} else {
 			// Give feedback when trying to use device controls while not connected
@@ -864,6 +976,32 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if a.spotifyState != nil && a.spotifyState.Track.Duration > 0 {
 			progressPercent := float64(a.spotifyState.Track.Progress) / float64(a.spotifyState.Track.Duration)
 			a.spotifyProgress.SetPercent(progressPercent)
+		}
+		return a, a.listenForResults()
+
+	case spotifyDevicesUpdateMsg:
+		a.spotifyDevices = msg.devices
+		a.spotifyDevicesLoaded = true
+		// Reset selection to first device or maintain current selection if valid
+		if len(a.spotifyDevices) > 0 {
+			if a.spotifyDeviceSelection >= len(a.spotifyDevices) {
+				a.spotifyDeviceSelection = 0
+			}
+		} else {
+			a.spotifyDeviceSelection = 0
+		}
+
+		if len(a.spotifyDevices) == 0 {
+			a.setMessage("No Spotify devices found. Make sure Spotify is open on at least one device.", MessageWarning)
+			a.spotifyDeviceMode = false // Exit device mode if no devices
+		} else {
+			if a.spotifyDeviceMode {
+				// Show device selection mode message after successful refresh
+				selectedDevice := a.spotifyDevices[a.spotifyDeviceSelection]
+				a.setMessage(fmt.Sprintf("Device selection mode - Selected: %s (%s) - Use ↑↓ to navigate, Enter to select, Esc to cancel", selectedDevice.Name, selectedDevice.Type), MessageInfo)
+			} else {
+				a.setMessage(fmt.Sprintf("Found %d Spotify device(s)", len(a.spotifyDevices)), MessageSuccess)
+			}
 		}
 		return a, a.listenForResults()
 	}
@@ -1563,6 +1701,7 @@ func (a *App) renderSpotifyTab(availableHeight int) string {
 				mutedTextStyle.Render("n - Next Track") + "\n" +
 				mutedTextStyle.Render("b - Previous Track") + "\n" +
 				mutedTextStyle.Render("h - Toggle Shuffle") + "\n" +
+				mutedTextStyle.Render("y - Device Selection & Cast") + "\n" +
 				mutedTextStyle.Render("r - Refresh Status") + "\n" +
 				mutedTextStyle.Render("x - Disconnect")
 		} else {
@@ -1577,6 +1716,16 @@ func (a *App) renderSpotifyTab(availableHeight int) string {
 		panelHeight = strings.Count(controlsPanel, "\n") + 2 // +2 for spacing
 		if currentHeight+panelHeight <= availableHeight {
 			panels = append(panels, controlsPanel)
+			currentHeight += panelHeight
+		}
+	}
+
+	// Spotify Devices Panel (if devices are loaded and space available)
+	if a.spotifyDevicesLoaded && currentHeight < availableHeight-8 {
+		devicePanel := a.renderSpotifyDevicesPanel(panelStyle)
+		panelHeight = strings.Count(devicePanel, "\n") + 2 // +2 for spacing
+		if currentHeight+panelHeight <= availableHeight {
+			panels = append(panels, devicePanel)
 		}
 	}
 
@@ -2107,6 +2256,40 @@ func (a *App) executeCommand(cmd QueuedCommand) {
 			a.sendResult(messageMsg{text: "Spotify not configured", msgType: MessageError})
 		}
 		return
+
+	// New Spotify device commands
+	case CmdSpotifyListDevices:
+		if a.spotifyClient != nil && a.spotifyClient.IsConnected() {
+			devices, err := a.spotifyClient.GetAvailableDevices()
+			if err != nil {
+				a.sendResult(messageMsg{text: fmt.Sprintf("Failed to get devices: %v", err), msgType: MessageError})
+			} else {
+				a.sendResult(spotifyDevicesUpdateMsg{devices: devices})
+			}
+		} else {
+			a.sendResult(messageMsg{text: "Spotify not connected", msgType: MessageError})
+		}
+		return
+
+	case CmdSpotifyTransferDevice:
+		if a.spotifyClient != nil && a.spotifyClient.IsConnected() {
+			if deviceID, ok := cmd.Params["deviceID"].(string); ok {
+				deviceName := cmd.Params["deviceName"].(string)
+				err := a.spotifyClient.TransferPlaybackToDevice(deviceID, true) // Start playing after transfer
+				if err != nil {
+					a.sendResult(messageMsg{text: fmt.Sprintf("Failed to transfer to %s: %v", deviceName, err), msgType: MessageError})
+				} else {
+					a.sendResult(messageMsg{text: fmt.Sprintf("Successfully transferred to %s", deviceName), msgType: MessageSuccess})
+					// Refresh Spotify status after transfer
+					a.queueCommand(CmdSpotifyRefresh, nil)
+				}
+			} else {
+				a.sendResult(messageMsg{text: "Invalid device transfer parameters", msgType: MessageError})
+			}
+		} else {
+			a.sendResult(messageMsg{text: "Spotify not connected", msgType: MessageError})
+		}
+		return
 	}
 
 	// Handle communication errors with retry logic
@@ -2358,6 +2541,10 @@ type spotifyUpdateMsg struct {
 	state *spotify.PlaybackState
 }
 
+type spotifyDevicesUpdateMsg struct {
+	devices []spotify.Device
+}
+
 // refreshStatusSync synchronously updates the device status
 func (a *App) refreshStatusSync() {
 	if a.device == nil {
@@ -2577,7 +2764,7 @@ func (a *App) refreshSpotifySync() {
 	}
 
 	// Send Spotify update message to UI thread
-	a.sendResult(spotifyUpdateMsg{state: state})
+	a.sendResult(spotifyUpdateMsg{state: &state})
 }
 
 func (a *App) renderSpotifyPanel(panelStyle lipgloss.Style) string {
@@ -2641,6 +2828,90 @@ func (a *App) renderSpotifyPanel(panelStyle lipgloss.Style) string {
 			fmt.Sprintf("Repeat: %s", valueStyle.Render(a.spotifyState.Repeat)),
 	)
 	return spotifyPanel
+}
+
+func (a *App) renderSpotifyDevicesPanel(panelStyle lipgloss.Style) string {
+	if len(a.spotifyDevices) == 0 {
+		return panelStyle.Render(
+			labelStyle.Render("🎵 Spotify Devices") + "\n\n" +
+				mutedTextStyle.Render("No devices found.") + "\n" +
+				mutedTextStyle.Render("Make sure Spotify is open on at least one device.") + "\n" +
+				mutedTextStyle.Render("Press 'y' to refresh and select devices."),
+		)
+	}
+
+	var deviceList strings.Builder
+	deviceList.WriteString(labelStyle.Render("🎵 Spotify Devices") + "\n\n")
+
+	if a.spotifyDeviceMode {
+		deviceList.WriteString(accentTextStyle.Render("Device Selection Mode") + "\n")
+		deviceList.WriteString(mutedTextStyle.Render("Use ↑↓ to navigate, Enter to select, Esc to cancel") + "\n\n")
+	}
+
+	for i, device := range a.spotifyDevices {
+		var deviceLine string
+		var icon string
+
+		// Device type icons
+		switch strings.ToLower(device.Type) {
+		case "computer":
+			icon = "💻"
+		case "smartphone":
+			icon = "📱"
+		case "speaker":
+			icon = "🔊"
+		case "tv":
+			icon = "📺"
+		case "castaudio", "chromecast_audio":
+			icon = "🎵"
+		case "castvideo", "chromecast":
+			icon = "📺"
+		default:
+			icon = "🎧"
+		}
+
+		// Format device name and status
+		deviceName := device.Name
+		if len(deviceName) > 25 {
+			deviceName = deviceName[:22] + "..."
+		}
+
+		var statusInfo string
+		if device.IsActive {
+			statusInfo = successTextStyle.Render(" (active)")
+		} else if device.IsRestricted {
+			statusInfo = mutedTextStyle.Render(" (restricted)")
+		}
+
+		// Volume info
+		volumeInfo := fmt.Sprintf(" %d%%", device.VolumePercent)
+
+		// Selection highlighting
+		if a.spotifyDeviceMode && i == a.spotifyDeviceSelection {
+			// Highlight selected device
+			deviceLine = fmt.Sprintf("▶ %s %s%s %s",
+				icon,
+				primaryTextStyle.Render(deviceName),
+				statusInfo,
+				valueStyle.Render(volumeInfo))
+		} else {
+			// Normal device display
+			deviceLine = fmt.Sprintf("  %s %s%s %s",
+				icon,
+				valueStyle.Render(deviceName),
+				statusInfo,
+				mutedTextStyle.Render(volumeInfo))
+		}
+
+		deviceList.WriteString(deviceLine + "\n")
+	}
+
+	// Add help text
+	if !a.spotifyDeviceMode {
+		deviceList.WriteString("\n" + mutedTextStyle.Render("Press 'y' to refresh devices and enter selection mode"))
+	}
+
+	return panelStyle.Render(deviceList.String())
 }
 
 // Helper function to format duration
@@ -3245,4 +3516,74 @@ func (a *App) Cleanup() error {
 	}
 
 	return nil
+}
+
+// Spotify device management methods
+func (a *App) spotifyListDevices() tea.Cmd {
+	if a.spotifyClient == nil || !a.spotifyClient.IsConnected() {
+		a.setMessage("Spotify not connected", MessageError)
+		return nil
+	}
+	a.queueCommand(CmdSpotifyListDevices, nil)
+	a.setMessage("Loading Spotify devices...", MessageInfo)
+	return nil
+}
+
+func (a *App) spotifyTransferToSelected() tea.Cmd {
+	if a.spotifyClient == nil || !a.spotifyClient.IsConnected() {
+		a.setMessage("Spotify not connected", MessageError)
+		return nil
+	}
+
+	if len(a.spotifyDevices) == 0 {
+		a.setMessage("No devices available", MessageWarning)
+		return nil
+	}
+
+	if a.spotifyDeviceSelection < 0 || a.spotifyDeviceSelection >= len(a.spotifyDevices) {
+		a.setMessage("Invalid device selection", MessageError)
+		return nil
+	}
+
+	selectedDevice := a.spotifyDevices[a.spotifyDeviceSelection]
+
+	// Check if already active
+	if selectedDevice.IsActive {
+		a.setMessage(fmt.Sprintf("'%s' is already the active device", selectedDevice.Name), MessageWarning)
+		a.spotifyDeviceMode = false
+		return nil
+	}
+
+	params := map[string]interface{}{
+		"deviceID":   selectedDevice.ID,
+		"deviceName": selectedDevice.Name,
+	}
+	a.queueCommand(CmdSpotifyTransferDevice, params)
+	a.setMessage(fmt.Sprintf("Transferring playback to '%s'...", selectedDevice.Name), MessageInfo)
+	a.spotifyDeviceMode = false
+	return nil
+}
+
+func (a *App) spotifyDeviceSelectionUp() {
+	if len(a.spotifyDevices) == 0 {
+		return
+	}
+	a.spotifyDeviceSelection--
+	if a.spotifyDeviceSelection < 0 {
+		a.spotifyDeviceSelection = len(a.spotifyDevices) - 1
+	}
+	selectedDevice := a.spotifyDevices[a.spotifyDeviceSelection]
+	a.setMessage(fmt.Sprintf("Selected: %s (%s)", selectedDevice.Name, selectedDevice.Type), MessageInfo)
+}
+
+func (a *App) spotifyDeviceSelectionDown() {
+	if len(a.spotifyDevices) == 0 {
+		return
+	}
+	a.spotifyDeviceSelection++
+	if a.spotifyDeviceSelection >= len(a.spotifyDevices) {
+		a.spotifyDeviceSelection = 0
+	}
+	selectedDevice := a.spotifyDevices[a.spotifyDeviceSelection]
+	a.setMessage(fmt.Sprintf("Selected: %s (%s)", selectedDevice.Name, selectedDevice.Type), MessageInfo)
 }

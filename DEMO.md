@@ -2,12 +2,13 @@
 
 ## Overview
 
-Your NAD controller now includes two powerful new features:
+Your NAD controller now includes powerful features:
 
 1. **Beautiful Terminal GUI (TUI)** - A modern, interactive interface
 2. **Device Simulator** - For testing without a real NAD device
+3. **🎯 Spotify Device Casting** - Cast to Chromecast, speakers, and other Spotify Connect devices
 
-## ✨ New Features Added
+## ✨ Features
 
 ### 🖥️ Terminal GUI (TUI)
 - **Real-time device status** with beautiful panels and frames
@@ -17,6 +18,7 @@ Your NAD controller now includes two powerful new features:
 - **Keyboard shortcuts** for all functions
 - **Auto-refresh** every 10 seconds
 - **Multi-panel layout** with connection, device info, and controls
+- **🎵 Spotify integration** with device casting and selection
 
 ### 🎛️ Device Simulator
 - **Complete NAD protocol implementation**
@@ -25,6 +27,13 @@ Your NAD controller now includes two powerful new features:
 - **Multiple client connections**
 - **Detailed logging** of all operations
 - **Configurable port**
+
+### 🎯 Spotify Device Casting
+- **Device Discovery**: Automatically finds Spotify Connect devices
+- **Visual Selection**: Interactive device picker with type icons
+- **Multi-Device Support**: Cast to Chromecast, computers, speakers, phones
+- **Real-time Updates**: See active devices and volume levels
+- **CLI & TUI Support**: Control via both command line and visual interface
 
 ## 🚀 Quick Start Demo
 
@@ -75,6 +84,19 @@ NAD_IP=127.0.0.1 ./nadctl tui --debug
 | `?` | Toggle help |
 | `q` / `Ctrl+C` | Quit |
 
+### Spotify Controls (when configured)
+| Key | Action |
+|-----|--------|
+| `space` | Play/pause Spotify |
+| `n` | Next track |
+| `b` | Previous track |
+| `s` | Toggle shuffle |
+| `t` | Toggle Spotify panel |
+| **`y`** | **Show Spotify devices & select device to cast to** |
+| **`↑/↓`** | **Navigate device selection** |
+| **`Enter`** | **Cast to selected device** |
+| **`Esc`** | **Cancel device selection** |
+
 ## 🎨 Visual Features
 
 ### Multi-Panel Layout
@@ -83,17 +105,19 @@ NAD_IP=127.0.0.1 ./nadctl tui --debug
 - **Power Status Panel** - Large, prominent power state indicator
 - **Audio Controls Panel** - Volume, source, and mute with progress bars
 - **Display Controls Panel** - Brightness with progress bar
+- **Spotify Panel** - Now playing info, controls, and device casting
 
 ### Color Coding
-- 🟢 **Green** - Connected, power on, unmuted
+- 🟢 **Green** - Connected, power on, unmuted, active device
 - 🔴 **Red** - Disconnected, errors, muted
 - 🟡 **Yellow** - Connecting, warnings
-- 🔵 **Blue** - Information, labels
+- 🔵 **Blue** - Information, labels, available devices
 - ⚫ **Gray** - Disabled states, help text
 
 ### Progress Bars
 - **Volume bar** - Visual representation of volume level (-80 to +10 dB)
 - **Brightness bar** - Visual representation of brightness (0-3)
+- **Track progress** - Spotify playback progress
 
 ## 📡 Testing All Features
 
@@ -102,7 +126,7 @@ NAD_IP=127.0.0.1 ./nadctl tui --debug
 # Set environment variable for easy testing
 export NAD_IP=127.0.0.1
 
-# Test all commands
+# Test NAD commands
 ./nadctl power               # Toggle power
 ./nadctl volume up           # Increase volume
 ./nadctl volume set -20      # Set specific volume
@@ -111,6 +135,11 @@ export NAD_IP=127.0.0.1
 ./nadctl mute                # Toggle mute
 ./nadctl dim up              # Increase brightness
 ./nadctl discover            # Discovery (will find simulator)
+
+# Test Spotify device casting (requires Spotify setup)
+./nadctl spotify devices     # List available Spotify Connect devices
+./nadctl spotify transfer "Chromecast"  # Cast to device by name
+./nadctl spotify transfer 1  # Cast to device by index
 ```
 
 ### Watch Real-time Updates in TUI
@@ -118,6 +147,13 @@ export NAD_IP=127.0.0.1
 2. Start the TUI in another terminal  
 3. Use CLI commands in a third terminal
 4. Watch the TUI update in real-time!
+
+### Test Spotify Device Casting
+1. Set up Spotify integration (see SPOTIFY_SETUP.md)
+2. Launch TUI: `./nadctl tui`
+3. Press `y` to show available Spotify devices
+4. Use ↑↓ to select a device, Enter to cast
+5. Watch playback transfer seamlessly!
 
 ## 🔧 Advanced Usage
 
@@ -143,25 +179,26 @@ export NAD_DEBUG=true          # Enable debug mode
 
 ## 🎯 Production Usage
 
-### With Real NAD Device
+### With Real NAD Device and Spotify
 ```bash
-# Auto-discover your NAD device
+# Auto-discover your NAD device and use Spotify
 ./nadctl tui
 
 # Or specify IP directly
 NAD_IP=192.168.1.100 ./nadctl tui
 
-# Or use config file
-./nadctl tui --config ~/.nadctl.yaml
+# Test Spotify device casting
+./nadctl spotify devices
+./nadctl spotify transfer "Living Room Chromecast"
 ```
 
 ### Performance
 - **Efficient updates** - Only refreshes when needed
 - **Connection pooling** - Reuses connections
-- **Caching** - Remembers discovered devices
+- **Caching** - Remembers discovered devices and Spotify device info
 - **Error handling** - Graceful failure and retry
 
-## 🎨 TUI Screenshots (Text-based)
+## 🎨 Enhanced TUI Screenshots (Text-based)
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
@@ -169,36 +206,35 @@ NAD_IP=192.168.1.100 ./nadctl tui
 │                   Terminal Interface for Premium Audio Control              │
 └─────────────────────────────────────────────────────────────────────────────┘
 
-┌─────────────────┐  ┌─────────────────┐
-│ Connection Status│  │ Power Status    │
-│                 │  │                 │
-│ 🟢 Connected to │  │  POWER ON       │
-│ 192.168.1.100   │  │                 │
-│                 │  │ Press 'p' to    │
-└─────────────────┘  │ toggle          │
-                     └─────────────────┘
-┌─────────────────┐  ┌─────────────────┐
-│ Device Info     │  │ Audio Controls  │
-│                 │  │                 │
-│ Model: NAD T758 │  │ Volume: -20.0dB │
-│ IP: 192.168.1.100│  │ ████████░░░░    │
-│                 │  │                 │
-└─────────────────┘  │ Source: Stream  │
-                     │ Mute: 🔊 UNMUTED│
-                     └─────────────────┘
-                     ┌─────────────────┐
-                     │ Display Controls│
-                     │                 │
-                     │ Brightness: 2   │
-                     │ ██████░░░░░░    │
+┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐
+│ Connection      │  │ Power Status    │  │ Spotify         │
+│                 │  │                 │  │                 │
+│ 🟢 Connected to │  │  POWER ON       │  │ ♪ Now Playing:  │
+│ 192.168.1.100   │  │                 │  │ Song Title      │
+│                 │  │ Press 'p' to    │  │ Artist Name     │
+└─────────────────┘  │ toggle          │  │                 │
+                     └─────────────────┘  │ Press 'y' for   │
+┌─────────────────┐  ┌─────────────────┐  │ device casting  │
+│ Device Info     │  │ Audio Controls  │  └─────────────────┘
+│                 │  │                 │  
+│ Model: NAD T758 │  │ Volume: -20.0dB │  ┌─────────────────┐
+│ IP: 192.168.1.100│  │ ████████░░░░    │  │ Spotify Devices │
+│                 │  │                 │  │                 │
+└─────────────────┘  │ Source: Stream  │  │ ▶️ 💻 MacBook   │
+                     │ Mute: 🔊 UNMUTED│  │   📺 Chromecast │
+                     └─────────────────┘  │   🔊 Kitchen    │
+                     ┌─────────────────┐  │   📱 iPhone     │
+                     │ Display Controls│  │                 │
+                     │                 │  │ ↑↓ Navigate    │
+                     │ Brightness: 2   │  │ Enter to cast   │
+                     │ ██████░░░░░░    │  └─────────────────┘
                      │                 │
                      │ Use ↑↓ keys     │
                      └─────────────────┘
 
-✓ Power toggled
+✓ Power toggled  🎵 Casting to Chromecast
 
 Last update: 14:30:25
-p toggle power • m toggle mute • + volume up • - volume down • ? more • q quit
 ```
 
 Enjoy your beautiful new NAD controller interface! 🎵✨ 

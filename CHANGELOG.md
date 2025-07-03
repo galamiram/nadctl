@@ -1,5 +1,43 @@
 # Changelog
 
+## [1.3.0] - 2025-01-03
+
+### Added
+- **Spotify Device Selection & Casting**: Enhanced TUI with comprehensive device management
+  - Interactive device selection interface in Spotify tab
+  - Support for Chromecast, computers, smartphones, speakers, and other Cast-enabled devices
+  - Real-time device listing with type icons (💻 🔊 📺 📱 🎵 🎧)
+  - Visual device selection with ↑↓ navigation and Enter to cast
+  - Active device highlighting and volume display
+  - Automatic device refresh when entering selection mode
+- **Enhanced Spotify CLI Commands**: Extended command-line interface
+  - `nadctl spotify devices` - List all available Spotify Connect devices
+  - `nadctl spotify transfer [device-name-or-index]` - Cast to specific device
+  - Support for device selection by name or numeric index
+  - Automatic playback continuation after device transfer
+- **Streamlined TUI Workflow**: Improved user experience
+  - Single 'y' key for device refresh and selection (no separate 'u' key needed)
+  - Contextual help messages during device selection
+  - Error handling for restricted devices and connection issues
+
+### Enhanced
+- **Spotify Integration**: Upgraded from basic playback to full device ecosystem management
+  - Added device discovery and enumeration capabilities
+  - Enhanced Spotify client with `GetAvailableDevices()` and `TransferPlaybackToDevice()` methods
+  - Improved error handling and connection management
+- **TUI Interface**: Enhanced Spotify tab with device management panel
+  - Device list panel with selection highlighting
+  - Real-time status updates (active/restricted devices)
+  - Visual device type indicators and volume levels
+  - Escape key handling for device selection mode cancellation
+
+### Technical Details
+- Added `CmdSpotifyListDevices` and `CmdSpotifyTransferDevice` command types
+- Implemented `spotifyDevicesUpdateMsg` for device list updates
+- Enhanced key bindings with `SpotifyDevices`, `SpotifyTransfer`, and navigation keys
+- Added device management state tracking (`spotifyDevices`, `spotifyDeviceSelection`, `spotifyDeviceMode`)
+- Integrated with Spotify Web API PlayerDevices and TransferPlayback endpoints
+
 ## [1.2.0] - 2025-07-03
 
 ### Added
