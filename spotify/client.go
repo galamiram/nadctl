@@ -423,6 +423,14 @@ func (c *Client) GetPlaybackState() (PlaybackState, error) {
 		log.Debug("No active playback session")
 		return PlaybackState{}, fmt.Errorf("no active playback")
 	}
+	if state.Item == nil {
+		log.Debug("No track currently playing (state.Item is nil)")
+		return PlaybackState{}, fmt.Errorf("no track currently playing")
+	}
+	if state.Device.ID == "" && state.Device.Name == "" {
+		log.Debug("No active device (state.Device is empty)")
+		return PlaybackState{}, fmt.Errorf("no active device")
+	}
 
 	log.WithFields(log.Fields{
 		"track":     state.Item.Name,

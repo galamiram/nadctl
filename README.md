@@ -135,6 +135,17 @@ The MCP server provides these tools for LLM use:
 - `nad_device_info` - Get device information
 - `nad_device_status` - Get comprehensive device status
 
+#### 🎯 Spotify Device Casting & Control
+- `spotify_devices_list` - List all available Spotify Connect devices (Chromecast, computers, speakers, phones)
+- `spotify_transfer_playback` - Transfer Spotify playback to a specific device by name or index
+- `spotify_play` - Start or resume Spotify playback
+- `spotify_pause` - Pause Spotify playback
+- `spotify_next` - Skip to next track
+- `spotify_previous` - Skip to previous track
+- `spotify_volume_set` - Set Spotify volume (0-100%)
+- `spotify_shuffle_toggle` - Toggle shuffle mode
+- `spotify_status` - Get current Spotify playback status and device info
+
 ### MCP Resources
 
 The server also provides these data resources:
@@ -217,10 +228,16 @@ For other MCP-compatible tools, use this general configuration:
 - **Environment Variables:**
   - `NAD_IP`: Your device IP (optional, will auto-discover if not set)
   - `NAD_PORT`: Device port (optional, defaults to 30001)
+  - `SPOTIFY_CLIENT_ID`: Your Spotify client ID for device casting (optional, see [SPOTIFY_SETUP.md](SPOTIFY_SETUP.md))
+
+**Note for Spotify Features:** To use Spotify device casting and control tools, you need to:
+1. Set up a Spotify application and get your Client ID (see [SPOTIFY_SETUP.md](SPOTIFY_SETUP.md))
+2. Configure your Client ID in `~/.nadctl.yaml` or set the `SPOTIFY_CLIENT_ID` environment variable
+3. Authenticate using the TUI (`nadctl tui`) or CLI (`nadctl spotify connect`) first
 
 ### Example Usage with AI
 
-Once configured, you can control your NAD device naturally:
+Once configured, you can control your NAD device and Spotify naturally:
 
 **User:** "Turn on my audio system and set it to TV input"
 
@@ -242,6 +259,25 @@ The current volume is -30 dB.
 **AI:** *[Uses nad_volume_up tool]*
 
 I've increased the volume to -25 dB. The audio should be louder now.
+
+**User:** "Show me my Spotify devices and cast to my living room Chromecast"
+
+**AI:** *[Uses spotify_devices_list and spotify_transfer_playback tools]*
+
+Available Spotify devices:
+1. 💻 MacBook Pro (Active) - Volume: 75%
+2. 📺 Living Room Chromecast - Volume: 80% 
+3. 🔊 Kitchen Speaker - Volume: 60%
+4. 📱 iPhone - Volume: 50% (Restricted)
+
+Successfully transferred playback to Living Room Chromecast (cast_video)
+
+**User:** "Start playing music and increase the Spotify volume"
+
+**AI:** *[Uses spotify_play and spotify_volume_set tools]*
+
+Spotify playback started
+Spotify volume set to 85%
 
 ### Troubleshooting MCP
 

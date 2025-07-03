@@ -1,5 +1,24 @@
 # Changelog
 
+## [1.3.1] - 2025-01-04
+
+### Added
+- **MCP Spotify Device Casting & Control**: The MCP server now exposes Spotify device management and playback tools for AI assistants (Cursor, Claude, etc.):
+  - `spotify_devices_list`: List all available Spotify Connect devices (Chromecast, computers, speakers, phones, etc.)
+  - `spotify_transfer_playback`: Transfer Spotify playback to a specific device by name or index (with optional play)
+  - `spotify_play`, `spotify_pause`, `spotify_next`, `spotify_previous`, `spotify_volume_set`, `spotify_shuffle_toggle`, `spotify_status`: Full playback and device control via MCP
+  - Updated documentation and config examples for MCP+Spotify integration
+
+### Fixed
+- **Spotify TUI Crash**: Fixed a segmentation fault when no active Spotify playback or device is present. The TUI now shows a user-friendly error instead of crashing.
+- **Defensive Checks**: Added robust nil/empty checks in Spotify client to prevent panics when playback/device state is missing.
+
+### Technical Details
+- Updated `GetPlaybackState` in `spotify/client.go` to check for nil/empty `state.Item` and `state.Device`.
+- Added new MCP tool handlers and registration in `cmd/mcp.go` for Spotify device and playback control.
+- Improved error propagation and handling in TUI refresh logic.
+- Updated `README.md` and `config.example.yaml` to document new MCP Spotify features.
+
 ## [1.3.0] - 2025-01-03
 
 ### Added

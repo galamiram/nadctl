@@ -4,10 +4,12 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/galamiram/nadctl/nadapi"
+	"github.com/galamiram/nadctl/spotify"
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 	"github.com/spf13/cobra"
@@ -28,13 +30,15 @@ The MCP server provides tools for:
 - Source selection and navigation
 - Display brightness adjustment
 - Device discovery and status
+- Spotify device casting and playback control
 
 Example usage with Cursor or other MCP-compatible AI tools:
   nadctl mcp
 
 Environment variables:
   NAD_IP: IP address of the NAD device (default: auto-discover)
-  NAD_PORT: Port of the NAD device (default: 30001)`,
+  NAD_PORT: Port of the NAD device (default: 30001)
+  SPOTIFY_CLIENT_ID: Spotify client ID for device casting (optional)`,
 	Run: func(cmd *cobra.Command, args []string) {
 		runMCPServer()
 	},
@@ -52,7 +56,7 @@ func runMCPServer() {
 	// Create MCP server
 	s := server.NewMCPServer(
 		"NAD Audio Controller",
-		"1.0.0",
+		"1.3.0",
 		server.WithToolCapabilities(true),
 		server.WithResourceCapabilities(true, true), // readable and writable
 		server.WithPromptCapabilities(true),
@@ -60,6 +64,7 @@ func runMCPServer() {
 
 	// Register tools
 	registerNADTools(s)
+	registerSpotifyTools(s)
 
 	// Register resources
 	registerNADResources(s)
@@ -104,6 +109,30 @@ func getDevice() (*nadapi.Device, error) {
 	}
 
 	return nadapi.New(deviceIP, devicePort)
+}
+
+func getMCPSpotifyClient() (*spotify.Client, error) {
+	clientID := viper.GetString("spotify.client_id")
+	if clientID == "" {
+		clientID = os.Getenv("SPOTIFY_CLIENT_ID")
+	}
+
+	if clientID == "" {
+		return nil, fmt.Errorf("Spotify client ID not configured. Set it in config file or SPOTIFY_CLIENT_ID environment variable")
+	}
+
+	redirectURL := viper.GetString("spotify.redirect_url")
+	if redirectURL == "" {
+		redirectURL = "http://localhost:8888/callback"
+	}
+
+	client := spotify.NewClient(clientID, redirectURL)
+
+	if !client.IsConnected() {
+		return nil, fmt.Errorf("not connected to Spotify. Please authenticate first using the TUI or CLI")
+	}
+
+	return client, nil
 }
 
 func registerNADTools(s *server.MCPServer) {
@@ -239,6 +268,70 @@ func registerNADTools(s *server.MCPServer) {
 	s.AddTool(
 		mcp.NewTool("nad_device_status", mcp.WithDescription("Get comprehensive status of the NAD device")),
 		handleDeviceStatus,
+	)
+}
+
+func registerSpotifyTools(s *server.MCPServer) {
+	// Spotify Device Management Tools
+	s.AddTool(
+		mcp.NewTool("spotify_devices_list", mcp.WithDescription("List all available Spotify Connect devices (Chromecast, computers, speakers, phones, etc.)")),
+		handleSpotifyDevicesList,
+	)
+
+	s.AddTool(
+		mcp.NewTool("spotify_transfer_playback",
+			mcp.WithDescription("Transfer Spotify playback to a specific device"),
+			mcp.WithString("device_identifier",
+				mcp.Required(),
+				mcp.Description("Device name (partial match) or device index (1, 2, 3, etc.)"),
+			),
+			mcp.WithBoolean("play",
+				mcp.Description("Whether to start playing immediately after transfer (default: false)"),
+			),
+		),
+		handleSpotifyTransferPlayback,
+	)
+
+	// Spotify Playback Control Tools
+	s.AddTool(
+		mcp.NewTool("spotify_play", mcp.WithDescription("Start or resume Spotify playback on current device")),
+		handleSpotifyPlay,
+	)
+
+	s.AddTool(
+		mcp.NewTool("spotify_pause", mcp.WithDescription("Pause Spotify playback")),
+		handleSpotifyPause,
+	)
+
+	s.AddTool(
+		mcp.NewTool("spotify_next", mcp.WithDescription("Skip to next track in Spotify")),
+		handleSpotifyNext,
+	)
+
+	s.AddTool(
+		mcp.NewTool("spotify_previous", mcp.WithDescription("Skip to previous track in Spotify")),
+		handleSpotifyPrevious,
+	)
+
+	s.AddTool(
+		mcp.NewTool("spotify_volume_set",
+			mcp.WithDescription("Set Spotify volume level"),
+			mcp.WithNumber("volume",
+				mcp.Required(),
+				mcp.Description("Volume level (0-100 percent)"),
+			),
+		),
+		handleSpotifyVolumeSet,
+	)
+
+	s.AddTool(
+		mcp.NewTool("spotify_shuffle_toggle", mcp.WithDescription("Toggle Spotify shuffle mode on/off")),
+		handleSpotifyShuffleToggle,
+	)
+
+	s.AddTool(
+		mcp.NewTool("spotify_status", mcp.WithDescription("Get current Spotify playback status and device information")),
+		handleSpotifyStatus,
 	)
 }
 
@@ -911,4 +1004,247 @@ Just tell me what you'd like to do and I'll use the appropriate tool!`),
 			),
 		},
 	), nil
+}
+
+func handleSpotifyDevicesList(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	client, err := getMCPSpotifyClient()
+	if err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("Failed to get Spotify client: %v", err)), nil
+	}
+
+	devices, err := client.GetAvailableDevices()
+	if err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("Failed to get devices: %v", err)), nil
+	}
+
+	if len(devices) == 0 {
+		return mcp.NewToolResultText("No Spotify Connect devices found. Make sure you have Spotify open on at least one device."), nil
+	}
+
+	var result strings.Builder
+	result.WriteString(fmt.Sprintf("Found %d Spotify Connect device(s):\n", len(devices)))
+	for i, device := range devices {
+		status := ""
+		if device.IsActive {
+			status = " (Active)"
+		}
+		if device.IsRestricted {
+			status += " (Restricted)"
+		}
+
+		// Device type icon
+		icon := getDeviceTypeIcon(device.Type)
+
+		result.WriteString(fmt.Sprintf("%d. %s %s (%s) - Volume: %d%%%s\n",
+			i+1, icon, device.Name, device.Type, device.VolumePercent, status))
+	}
+
+	return mcp.NewToolResultText(result.String()), nil
+}
+
+func handleSpotifyTransferPlayback(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	client, err := getMCPSpotifyClient()
+	if err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("Failed to get Spotify client: %v", err)), nil
+	}
+
+	deviceIdentifier, err := request.RequireString("device_identifier")
+	if err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("Invalid device_identifier parameter: %v", err)), nil
+	}
+
+	// The play parameter is optional, defaults to false
+	play := false
+	// Note: Since play is optional and boolean handling is complex in MCP,
+	// we'll document that users should set play=true in the tool call if they want to start playing
+
+	// Get available devices to find the target device
+	devices, err := client.GetAvailableDevices()
+	if err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("Failed to get available devices: %v", err)), nil
+	}
+
+	if len(devices) == 0 {
+		return mcp.NewToolResultError("No devices found. Make sure you have Spotify open on at least one device."), nil
+	}
+
+	var selectedDevice *spotify.Device
+
+	// Try to parse as index first
+	if index, err := strconv.Atoi(deviceIdentifier); err == nil {
+		if index < 1 || index > len(devices) {
+			return mcp.NewToolResultError(fmt.Sprintf("Invalid device index %d. Available devices: 1-%d", index, len(devices))), nil
+		}
+		selectedDevice = &devices[index-1]
+	} else {
+		// Search by name (case-insensitive partial match)
+		deviceIdentifier = strings.ToLower(deviceIdentifier)
+		for _, device := range devices {
+			if strings.Contains(strings.ToLower(device.Name), deviceIdentifier) {
+				selectedDevice = &device
+				break
+			}
+		}
+	}
+
+	if selectedDevice == nil {
+		return mcp.NewToolResultError(fmt.Sprintf("Device '%s' not found. Use spotify_devices_list to see available devices.", deviceIdentifier)), nil
+	}
+
+	// Check if already active
+	if selectedDevice.IsActive {
+		return mcp.NewToolResultText(fmt.Sprintf("Device '%s' is already the active playback device.", selectedDevice.Name)), nil
+	}
+
+	// Check if device is restricted
+	if selectedDevice.IsRestricted {
+		return mcp.NewToolResultError(fmt.Sprintf("Device '%s' does not allow remote control.", selectedDevice.Name)), nil
+	}
+
+	// Transfer playback
+	err = client.TransferPlaybackToDevice(selectedDevice.ID, play)
+	if err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("Failed to transfer playback to %s: %v", selectedDevice.Name, err)), nil
+	}
+
+	playStatus := ""
+	if play {
+		playStatus = " and started playing"
+	}
+
+	return mcp.NewToolResultText(fmt.Sprintf("Successfully transferred playback to %s (%s)%s", selectedDevice.Name, selectedDevice.Type, playStatus)), nil
+}
+
+func handleSpotifyPlay(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	client, err := getMCPSpotifyClient()
+	if err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("Failed to get Spotify client: %v", err)), nil
+	}
+
+	if err := client.Play(); err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("Failed to start playback: %v", err)), nil
+	}
+
+	return mcp.NewToolResultText("Spotify playback started"), nil
+}
+
+func handleSpotifyPause(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	client, err := getMCPSpotifyClient()
+	if err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("Failed to get Spotify client: %v", err)), nil
+	}
+
+	if err := client.Pause(); err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("Failed to pause playback: %v", err)), nil
+	}
+
+	return mcp.NewToolResultText("Spotify playback paused"), nil
+}
+
+func handleSpotifyNext(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	client, err := getMCPSpotifyClient()
+	if err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("Failed to get Spotify client: %v", err)), nil
+	}
+
+	if err := client.Next(); err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("Failed to skip to next track: %v", err)), nil
+	}
+
+	return mcp.NewToolResultText("Skipped to next track"), nil
+}
+
+func handleSpotifyPrevious(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	client, err := getMCPSpotifyClient()
+	if err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("Failed to get Spotify client: %v", err)), nil
+	}
+
+	if err := client.Previous(); err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("Failed to skip to previous track: %v", err)), nil
+	}
+
+	return mcp.NewToolResultText("Skipped to previous track"), nil
+}
+
+func handleSpotifyVolumeSet(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	client, err := getMCPSpotifyClient()
+	if err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("Failed to get Spotify client: %v", err)), nil
+	}
+
+	volume, err := request.RequireFloat("volume")
+	if err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("Invalid volume parameter: %v", err)), nil
+	}
+
+	if volume < 0 || volume > 100 {
+		return mcp.NewToolResultError("Volume must be between 0 and 100"), nil
+	}
+
+	if err := client.SetVolume(int(volume)); err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("Failed to set volume: %v", err)), nil
+	}
+
+	return mcp.NewToolResultText(fmt.Sprintf("Spotify volume set to %.0f%%", volume)), nil
+}
+
+func handleSpotifyShuffleToggle(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	client, err := getMCPSpotifyClient()
+	if err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("Failed to get Spotify client: %v", err)), nil
+	}
+
+	if err := client.ToggleShuffle(); err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("Failed to toggle shuffle: %v", err)), nil
+	}
+
+	return mcp.NewToolResultText("Spotify shuffle mode toggled"), nil
+}
+
+func handleSpotifyStatus(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	client, err := getMCPSpotifyClient()
+	if err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("Failed to get Spotify client: %v", err)), nil
+	}
+
+	state, err := client.GetPlaybackState()
+	if err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("Failed to get Spotify status: %v", err)), nil
+	}
+
+	var result strings.Builder
+	result.WriteString("Spotify Playback Status:\n")
+	result.WriteString(fmt.Sprintf("Track: %s\n", state.Track.Name))
+	result.WriteString(fmt.Sprintf("Artist: %s\n", state.Track.Artist))
+	result.WriteString(fmt.Sprintf("Album: %s\n", state.Track.Album))
+	result.WriteString(fmt.Sprintf("Device: %s\n", state.Device))
+	result.WriteString(fmt.Sprintf("Playing: %t\n", state.IsPlaying))
+	result.WriteString(fmt.Sprintf("Volume: %d%%\n", state.Volume))
+	result.WriteString(fmt.Sprintf("Shuffle: %t\n", state.Shuffle))
+	result.WriteString(fmt.Sprintf("Repeat: %s\n", state.Repeat))
+
+	return mcp.NewToolResultText(result.String()), nil
+}
+
+// Helper function to get device type icons
+func getDeviceTypeIcon(deviceType string) string {
+	switch strings.ToLower(deviceType) {
+	case "computer":
+		return "💻"
+	case "smartphone":
+		return "📱"
+	case "speaker":
+		return "🔊"
+	case "tv":
+		return "📺"
+	case "cast_video", "chromecast":
+		return "📺"
+	case "audio_dongle":
+		return "🎧"
+	case "game_console":
+		return "🎮"
+	default:
+		return "🎵"
+	}
 }

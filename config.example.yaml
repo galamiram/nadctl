@@ -8,11 +8,13 @@ debug: false         # Enable debug logging
 # Spotify Integration (optional)
 # Get your Client ID from https://developer.spotify.com/dashboard
 # Uses PKCE flow - no client secret needed for security
+# Also enables Spotify device casting via MCP for AI assistants
 spotify:
   client_id: "your_spotify_client_id_here"
   redirect_url: "http://localhost:8080/callback"  # optional, defaults to this
 
 # MCP (Model Context Protocol) Configuration
+# Enables AI assistants to control NAD device and Spotify casting
 mcp:
   enabled: true
   port: 8080 
