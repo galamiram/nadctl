@@ -1,0 +1,22 @@
+name: Test Nix Package Persistence
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ "test-nix-persistence" ]
+
+jobs:
+  simple-test:
+    runs-on: arc-runners
+    steps:
+      - name: Basic test
+        run: |
+          echo "=== Basic runner test ==="
+          whoami
+          pwd
+          ls -la /
+          echo "=== Environment ==="
+          env | head -10
+          echo "=== Mounts ==="
+          df -h
+          echo "=== Success! ===" 
